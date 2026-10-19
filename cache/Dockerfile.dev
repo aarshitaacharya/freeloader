@@ -1,6 +1,6 @@
 # Linux dev/test environment for fl-cache (epoll is Linux-only).
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential cmake ca-certificates redis-tools python3 git procps \
+      build-essential cmake ca-certificates redis-server redis-tools python3 python3-matplotlib git procps util-linux \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src/cache

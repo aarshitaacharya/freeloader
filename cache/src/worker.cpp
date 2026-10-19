@@ -44,7 +44,7 @@ void Worker::register_pending(bool discard) {
   if (discard) return;  // UniqueFd closes them
   for (auto& f : batch) {
     const int raw = f.get();
-    auto conn = std::make_unique<Connection>(std::move(f), store_, info_, commands_);
+    auto conn = std::make_unique<Connection>(std::move(f), store_, info_, metrics_);
     if (!ep_.add(raw, kConnEvents)) continue;  // conn (and its fd) destroyed
     conns_.emplace(raw, std::move(conn));
     nconns_.fetch_add(1, std::memory_order_relaxed);

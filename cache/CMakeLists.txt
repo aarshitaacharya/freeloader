@@ -26,6 +26,7 @@ find_package(Threads REQUIRED)
 
 add_library(flcore STATIC
   src/resp.cpp src/store.cpp src/commands.cpp
+  src/metrics.cpp src/metrics_server.cpp
   src/connection.cpp src/worker.cpp src/server.cpp)
 target_include_directories(flcore PUBLIC include)
 target_link_libraries(flcore PUBLIC Threads::Threads PRIVATE fl_warnings)
@@ -41,7 +42,11 @@ set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 add_executable(fl-tests
-  tests/resp_test.cpp tests/store_test.cpp tests/commands_test.cpp tests/server_test.cpp)
+  tests/resp_test.cpp tests/store_test.cpp tests/commands_test.cpp tests/metrics_test.cpp tests/server_test.cpp)
 target_link_libraries(fl-tests PRIVATE flcore fl_warnings GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(fl-tests DISCOVERY_TIMEOUT 60)
+
+# In-process store microbenchmark (see bench/).
+add_executable(fl-store-bench ../bench/store_bench.cpp)
+target_link_libraries(fl-store-bench PRIVATE flcore fl_warnings)

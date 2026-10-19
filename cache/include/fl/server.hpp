@@ -2,9 +2,12 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "fl/commands.hpp"
+#include "fl/metrics.hpp"
+#include "fl/metrics_server.hpp"
 #include "fl/store.hpp"
 #include "fl/unique_fd.hpp"
 #include "fl/worker.hpp"
@@ -16,6 +19,7 @@ struct ServerConfig {
   size_t threads = 0;     // 0 = hardware concurrency
   size_t shards = 64;
   size_t max_keys = 0;    // 0 = unlimited
+  std::optional<uint16_t> metrics_port{};  // nullopt = no metrics listener; 0 = any free port
 };
 
 // Acceptor (the thread that calls run()) + N epoll workers + a background
@@ -28,6 +32,8 @@ class Server {
 
   uint16_t port() const { return port_; }
   Store& store() { return store_; }
+  uint16_t metrics_port() const { return metrics_ ? metrics_->port() : 0; }
+  MetricsSnapshot snapshot() const;
 
   // Blocks until stop() is called, then drains in-flight replies and returns.
   void run();
@@ -43,6 +49,7 @@ class Server {
   std::atomic<bool> stop_{false};
   InfoFn info_;
   std::vector<std::unique_ptr<Worker>> workers_;
+  std::unique_ptr<MetricsServer> metrics_;
 };
 
 }  // namespace fl

@@ -3,15 +3,15 @@
 #include <sys/socket.h>
 
 #include <cerrno>
+#include <chrono>
 #include <string_view>
 
 #include "fl/resp.hpp"
 
 namespace fl {
 
-Connection::Connection(UniqueFd fd, Store& store, const InfoFn* info,
-                       std::atomic<uint64_t>& commands)
-    : fd_(std::move(fd)), store_(store), info_(info), commands_(commands) {}
+Connection::Connection(UniqueFd fd, Store& store, const InfoFn* info, WorkerMetrics& metrics)
+    : fd_(std::move(fd)), store_(store), info_(info), metrics_(metrics) {}
 
 bool Connection::flush() {
   while (out_off_ < out_.size()) {
@@ -34,7 +34,6 @@ bool Connection::flush() {
 
 void Connection::process_input() {
   size_t off = 0;
-  size_t executed = 0;
   more_input_ = false;
   while (off < in_.size()) {
     if (pending() > kHighWater) {
@@ -52,8 +51,12 @@ void Connection::process_input() {
     }
     off += r.consumed;
     if (r.args.empty()) continue;  // blank inline line
-    out_ += execute(store_, r.args, info_);
-    ++executed;
+    Cmd cmd = Cmd::Unknown;
+    const auto t0 = std::chrono::steady_clock::now();
+    out_ += execute(store_, r.args, info_, &cmd);
+    const auto dt = std::chrono::steady_clock::now() - t0;
+    metrics_.observe(cmd, static_cast<uint64_t>(
+                              std::chrono::duration_cast<std::chrono::nanoseconds>(dt).count()));
   }
   if (off > 0) in_.erase(0, off);
   if (in_.size() > kMaxInput) {
@@ -61,7 +64,6 @@ void Connection::process_input() {
     eof_ = true;
     in_.clear();
   }
-  if (executed) commands_.fetch_add(executed, std::memory_order_relaxed);
 }
 
 Connection::Result Connection::service() {

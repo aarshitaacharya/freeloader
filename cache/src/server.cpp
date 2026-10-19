@@ -1,6 +1,5 @@
 #include "fl/server.hpp"
 
-#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -13,6 +12,8 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+
+#include "fl/net.hpp"
 
 namespace fl {
 namespace {
@@ -31,21 +32,7 @@ ScopeExit(F) -> ScopeExit<F>;
 
 Server::Server(const ServerConfig& cfg)
     : store_(StoreOptions{cfg.shards, cfg.max_keys, {}}) {
-  listen_fd_.reset(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-  if (!listen_fd_.valid()) throw std::runtime_error(sys_error("socket"));
-  int yes = 1;
-  ::setsockopt(listen_fd_.get(), SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
-
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  addr.sin_port = htons(cfg.port);
-  if (::bind(listen_fd_.get(), reinterpret_cast<sockaddr*>(&addr), sizeof addr) < 0)
-    throw std::runtime_error(sys_error("bind"));
-  if (::listen(listen_fd_.get(), 511) < 0) throw std::runtime_error(sys_error("listen"));
-  socklen_t len = sizeof addr;
-  ::getsockname(listen_fd_.get(), reinterpret_cast<sockaddr*>(&addr), &len);
-  port_ = ntohs(addr.sin_port);
+  listen_fd_ = listen_tcp(cfg.port, 511, port_);
 
   info_ = [this] {
     int64_t conns = 0;
@@ -62,6 +49,23 @@ Server::Server(const ServerConfig& cfg)
   size_t n = cfg.threads ? cfg.threads : std::max(1u, std::thread::hardware_concurrency());
   for (size_t i = 0; i < n; ++i)
     workers_.push_back(std::make_unique<Worker>(store_, &info_, stop_));
+
+  if (cfg.metrics_port)
+    metrics_ = std::make_unique<MetricsServer>(
+        *cfg.metrics_port, [this] { return render_prometheus(snapshot()); },
+        [this] { return !stop_.load(std::memory_order_relaxed); });
+}
+
+MetricsSnapshot Server::snapshot() const {
+  MetricsSnapshot s;
+  for (const auto& w : workers_) {
+    s.add(w->metrics());
+    s.connections += w->connections();
+  }
+  s.keys = store_.size();
+  s.evictions = store_.evictions();
+  s.expired = store_.expired();
+  return s;
 }
 
 void Server::accept_ready(size_t& next_worker) {
@@ -88,11 +92,13 @@ void Server::run() {
   // Declared before the threads below so it is destroyed after them; the
   // guard further down raises stop_ first, so every exit path joins cleanly.
   std::jthread sweeper;
+  std::jthread metrics_thread;
   for (auto& w : workers_) w->start();
   ScopeExit join_all{[this] {
     stop_.store(true, std::memory_order_relaxed);
     for (auto& w : workers_) w->join();  // workers drain in-flight replies
   }};
+  if (metrics_) metrics_thread = std::jthread([this] { metrics_->run(stop_); });
   sweeper = std::jthread([this] {
     while (!stop_.load(std::memory_order_relaxed)) {
       store_.expire_cycle();

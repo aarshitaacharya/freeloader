@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <unordered_map>
 
 #include "fl/resp.hpp"
 
@@ -23,12 +24,23 @@ std::string upper(std::string s) {
   return s;
 }
 
+Cmd lookup(const std::string& upper_name) {
+  static const std::unordered_map<std::string, Cmd> table = {
+      {"PING", Cmd::Ping},     {"GET", Cmd::Get},       {"SET", Cmd::Set},
+      {"DEL", Cmd::Del},       {"INCRBY", Cmd::Incrby}, {"EXPIRE", Cmd::Expire},
+      {"TTL", Cmd::Ttl},       {"DBSIZE", Cmd::Dbsize}, {"INFO", Cmd::Info}};
+  auto it = table.find(upper_name);
+  return it == table.end() ? Cmd::Unknown : it->second;
+}
+
 const char* kNotInt = "ERR value is not an integer or out of range";
 
 }  // namespace
 
-std::string execute(Store& store, const std::vector<std::string>& args, const InfoFn* extra_info) {
+std::string execute(Store& store, const std::vector<std::string>& args, const InfoFn* extra_info,
+                    Cmd* ran) {
   const std::string cmd = upper(args[0]);
+  if (ran) *ran = lookup(cmd);
   auto arity_err = [&] {
     return reply_error("ERR wrong number of arguments for '" + cmd + "' command");
   };

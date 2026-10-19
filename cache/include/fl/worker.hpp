@@ -27,7 +27,8 @@ class Worker {
   void join();
   void add_connection(UniqueFd fd);  // thread-safe; called from the acceptor
 
-  uint64_t commands() const { return commands_.load(std::memory_order_relaxed); }
+  uint64_t commands() const { return metrics_.total_commands(); }
+  const WorkerMetrics& metrics() const { return metrics_; }
   int64_t connections() const { return nconns_.load(std::memory_order_relaxed); }
 
  private:
@@ -45,7 +46,7 @@ class Worker {
   std::vector<UniqueFd> pending_;
   std::unordered_map<int, std::unique_ptr<Connection>> conns_;  // loop thread only
 
-  alignas(64) std::atomic<uint64_t> commands_{0};
+  WorkerMetrics metrics_;  // cache-line aligned; written only by this worker's thread
   std::atomic<int64_t> nconns_{0};
   std::jthread thread_;
 };

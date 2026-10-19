@@ -4,7 +4,7 @@ IMAGE := fl-cache-dev
 VOLUME := fl-cache-build
 DOCKER_RUN := docker run --rm -v $(CURDIR):/src -v $(VOLUME):/src/cache/build $(IMAGE)
 
-.PHONY: cache-image cache-test cache-asan cache-tsan cache-release cache-run cache-shell
+.PHONY: bench bench-store bench-report cache-image cache-test cache-asan cache-tsan cache-release cache-run cache-shell
 
 cache-image:
 	docker build -q -t $(IMAGE) -f cache/Dockerfile.dev cache
@@ -28,3 +28,15 @@ cache-run: cache-release
 
 cache-shell: cache-image
 	docker run --rm -it -v $(CURDIR):/src -v $(VOLUME):/src/cache/build $(IMAGE) bash
+
+# Benchmarks (take ~15-25 minutes; run on an otherwise idle machine).
+BENCH_RUN := docker run --rm -e REPS -e CLIENTS -e CONFIGS -e SECONDS_PER_RUN -v $(CURDIR):/src -v $(VOLUME):/src/cache/build -w /src/bench $(IMAGE)
+
+bench: cache-release
+	$(BENCH_RUN) ./run.sh
+
+bench-store: cache-release
+	$(BENCH_RUN) ./run_store.sh
+
+bench-report: cache-image
+	$(BENCH_RUN) python3 report.py

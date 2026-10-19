@@ -3,6 +3,7 @@
 #include <string>
 
 #include "fl/commands.hpp"
+#include "fl/metrics.hpp"
 #include "fl/store.hpp"
 #include "fl/unique_fd.hpp"
 
@@ -19,7 +20,7 @@ class Connection {
     Close,  // destroy this connection
   };
 
-  Connection(UniqueFd fd, Store& store, const InfoFn* info, std::atomic<uint64_t>& commands);
+  Connection(UniqueFd fd, Store& store, const InfoFn* info, WorkerMetrics& metrics);
 
   int fd() const { return fd_.get(); }
   Result service();
@@ -39,7 +40,7 @@ class Connection {
   UniqueFd fd_;
   Store& store_;
   const InfoFn* info_;
-  std::atomic<uint64_t>& commands_;
+  WorkerMetrics& metrics_;
   std::string in_;
   std::string out_;
   size_t out_off_ = 0;

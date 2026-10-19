@@ -17,8 +17,8 @@
     { "name": "tsan", "configurePreset": "tsan" }
   ],
   "testPresets": [
-    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
-    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } },
-    { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true } }
+    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true }, "execution": { "timeout": 120 } },
+    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true }, "execution": { "timeout": 120 } },
+    { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true }, "execution": { "timeout": 120 } }
   ]
 }
