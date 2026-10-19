@@ -6,7 +6,9 @@
 
 namespace fl {
 
-// Incremental parser for RESP2 client requests (arrays of bulk strings).
+// Incremental parser for RESP2 client requests: arrays of bulk strings, plus
+// inline commands (a bare line, as Redis accepts). An Ok result with empty
+// args is a blank inline line and should be ignored.
 enum class ParseStatus { Ok, Incomplete, Error };
 
 struct ParseResult {
@@ -17,6 +19,7 @@ struct ParseResult {
 };
 
 constexpr size_t kMaxArgs = 1024 * 1024;
+constexpr size_t kMaxInlineLen = 64 * 1024;
 constexpr size_t kMaxBulkLen = 512 * 1024 * 1024;
 
 // Parses at most one command from the front of `buf`. Never reads past `buf`.

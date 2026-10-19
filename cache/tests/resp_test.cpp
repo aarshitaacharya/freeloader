@@ -52,7 +52,6 @@ TEST(RespParser, EmptyBulkString) {
 
 TEST(RespParser, MalformedInputIsError) {
   const char* bad[] = {
-      "PING\r\n",                       // not an array
       "*x\r\n",                         // non-numeric count
       "*0\r\n",                         // zero args
       "*-1\r\n",                        // negative count
@@ -77,4 +76,28 @@ TEST(RespReply, Encoders) {
   EXPECT_EQ(reply_int(-3), ":-3\r\n");
   EXPECT_EQ(reply_bulk("hi"), "$2\r\nhi\r\n");
   EXPECT_EQ(reply_null(), "$-1\r\n");
+}
+
+TEST(RespInline, ParsesBareLineCommands) {
+  auto r = parse_command("PING\r\n");
+  ASSERT_EQ(r.status, ParseStatus::Ok);
+  EXPECT_EQ(r.consumed, 6u);
+  EXPECT_EQ(r.args, (std::vector<std::string>{"PING"}));
+
+  r = parse_command("SET  a\t1 \n");  // extra whitespace, bare LF
+  ASSERT_EQ(r.status, ParseStatus::Ok);
+  EXPECT_EQ(r.args, (std::vector<std::string>{"SET", "a", "1"}));
+}
+
+TEST(RespInline, IncompleteUntilNewlineAndBlankLinesAreEmpty) {
+  EXPECT_EQ(parse_command("PIN").status, ParseStatus::Incomplete);
+  auto r = parse_command("\r\n");
+  ASSERT_EQ(r.status, ParseStatus::Ok);
+  EXPECT_TRUE(r.args.empty());
+  EXPECT_EQ(r.consumed, 2u);
+}
+
+TEST(RespInline, OverlongLineIsError) {
+  EXPECT_EQ(parse_command(std::string(kMaxInlineLen + 1, 'a')).status, ParseStatus::Error);
+  EXPECT_EQ(parse_command(std::string(kMaxInlineLen + 1, 'a') + "\n").status, ParseStatus::Error);
 }

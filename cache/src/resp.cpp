@@ -26,12 +26,36 @@ bool parse_len(std::string_view s, long long& out) {
   return ec == std::errc() && p == s.data() + s.size();
 }
 
+// Inline commands ("PING\r\n", as typed into telnet or sent by redis-benchmark's
+// inline tests): one line, arguments split on spaces/tabs, no quoting.
+ParseResult parse_inline(std::string_view buf) {
+  ParseResult r;
+  size_t nl = buf.find('\n');
+  if (nl == std::string_view::npos) {
+    if (buf.size() > kMaxInlineLen) return fail("Protocol error: too big inline request");
+    return r;
+  }
+  if (nl > kMaxInlineLen) return fail("Protocol error: too big inline request");
+  std::string_view line = buf.substr(0, nl);
+  if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+  size_t i = 0;
+  while (i < line.size()) {
+    while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+    size_t start = i;
+    while (i < line.size() && line[i] != ' ' && line[i] != '\t') ++i;
+    if (i > start) r.args.emplace_back(line.substr(start, i - start));
+  }
+  r.status = ParseStatus::Ok;  // args may be empty (blank line): caller skips it
+  r.consumed = nl + 1;
+  return r;
+}
+
 }  // namespace
 
 ParseResult parse_command(std::string_view buf) {
   ParseResult r;
   if (buf.empty()) return r;
-  if (buf[0] != '*') return fail("Protocol error: expected '*'");
+  if (buf[0] != '*') return parse_inline(buf);
 
   std::string_view line;
   size_t pos = 0;
