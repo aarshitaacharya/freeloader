@@ -1,0 +1,36 @@
+# One replica: rate-limit counters live here, and the data is disposable by design
+# (docs/decisions/0003). Losing the pod resets counters; the gateway fails open meanwhile.
+apiVersion: v1
+kind: Service
+metadata: {name: fl-cache}
+spec:
+  selector: {app: fl-cache}
+  ports:
+    - {name: resp, port: 6400}
+    - {name: metrics, port: 9400}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: fl-cache}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: fl-cache}}
+  template:
+    metadata: {labels: {app: fl-cache}}
+    spec:
+      terminationGracePeriodSeconds: 30   # SIGTERM drains connections before exit
+      containers:
+        - name: fl-cache
+          image: fl-cache:dev
+          imagePullPolicy: IfNotPresent
+          ports: [{name: resp, containerPort: 6400}, {name: metrics, containerPort: 9400}]
+          readinessProbe:
+            tcpSocket: {port: resp}
+            periodSeconds: 2
+          livenessProbe:
+            tcpSocket: {port: resp}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 512Mi}

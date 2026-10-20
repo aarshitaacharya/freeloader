@@ -23,7 +23,7 @@ providers:
     api_key_env: MOCK_API_KEY
     reset: {timezone: UTC}
     models:
-      mock-model: {requests_per_day: 1000}   # lower it (e.g. to 10) and restart the guard to watch it flag `ok`
+      mock-model: {requests_per_day: 100000}   # lower it (e.g. to 10) and restart the guard to watch it flag `ok`
   slow:    {base_url: "http://mock-provider:9000/slow/v1",    api_key_env: MOCK_API_KEY}
   nousage: {base_url: "http://mock-provider:9000/nousage/v1", api_key_env: MOCK_API_KEY}
   cutoff:  {base_url: "http://mock-provider:9000/cutoff/v1",  api_key_env: MOCK_API_KEY}

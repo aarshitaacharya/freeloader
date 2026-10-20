@@ -1,0 +1,16 @@
+# /v1 -> gateway. /admin -> gateway too; the admin API itself arrives in level 9, until then it 404s.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: freeloader
+  labels: {tier: app}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"      # SSE must reach the client unbuffered
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - {path: /v1, pathType: Prefix, backend: {service: {name: gateway, port: {name: http}}}}
+          - {path: /admin, pathType: Prefix, backend: {service: {name: gateway, port: {name: http}}}}

@@ -1,0 +1,18 @@
+# Idempotent: creates llm.usage only if it is missing.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: topic-init}
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: rpk
+          image: docker.redpanda.com/redpandadata/redpanda:v26.2.5
+          command:
+            - sh
+            - -c
+            - >-
+              rpk -X brokers=redpanda:9093 topic describe llm.usage >/dev/null 2>&1 ||
+              rpk -X brokers=redpanda:9093 topic create llm.usage --partitions 6 --topic-config retention.ms=604800000

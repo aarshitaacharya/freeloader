@@ -1,0 +1,8 @@
+# Offline variant: adds the fake provider (tools/mock-provider). up.sh --mock also switches
+# freeloader-config to config/providers.mock.yaml and adds MOCK_API_KEY to the Secret.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: freeloader
+resources:
+  - ../dev
+  - mock-provider.yaml

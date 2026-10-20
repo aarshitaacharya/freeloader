@@ -1,0 +1,35 @@
+# One replica: it evaluates every provider's counters, so a second would only duplicate work.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: guard, labels: {tier: app}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: guard}}
+  template:
+    metadata:
+      labels: {app: guard}
+      annotations: {prometheus.io/scrape: "true", prometheus.io/port: "9102"}
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: guard
+          image: fl-guard:dev
+          imagePullPolicy: IfNotPresent
+          ports: [{name: metrics, containerPort: 9102}]
+          env:
+            - {name: FL_KAFKA_BROKERS, value: "redpanda:9093"}
+            - {name: FL_CACHE_ADDR, value: "fl-cache:6400"}
+            - {name: FL_CONFIG, value: /etc/freeloader/providers.yaml}
+          volumeMounts: [{name: config, mountPath: /etc/freeloader, readOnly: true}]
+          readinessProbe:
+            httpGet: {path: /readyz, port: metrics}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {memory: 128Mi}
+      volumes:
+        - {name: config, configMap: {name: freeloader-config}}

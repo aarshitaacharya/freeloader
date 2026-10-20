@@ -102,3 +102,34 @@ check-openai-client:
 # Refuses to run while any ledger replica is up:  docker compose stop ledger
 ledger-replay:
 	$(COMPOSE) run --rm --no-deps ledger replay --confirm
+
+# ---- Level 7: Kubernetes on kind. kind and helm are fetched into ./.bin (gitignored). ----
+KIND_VERSION := v0.29.0
+HELM_VERSION := v3.18.4
+KUBECTL := kubectl --context kind-freeloader -n freeloader
+
+.PHONY: kind-tools kind-up kind-up-mock kind-down kind-app kind-drill
+
+kind-tools:
+	@mkdir -p .bin
+	@[ -x .bin/kind ] || { curl -fsSL -o .bin/kind https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$$(uname -s | tr A-Z a-z)-$$(uname -m | sed s/x86_64/amd64/\;s/arm64/arm64/) && chmod +x .bin/kind; }
+	@[ -x .bin/helm ] || { os=$$(uname -s | tr A-Z a-z); arch=$$(uname -m | sed s/x86_64/amd64/); \
+	  curl -fsSL https://get.helm.sh/helm-$(HELM_VERSION)-$$os-$$arch.tar.gz | tar xz -C .bin --strip-components=1 $$os-$$arch/helm; }
+
+kind-up: kind-tools
+	deploy/kind/up.sh
+
+kind-up-mock: kind-tools
+	deploy/kind/up.sh --mock
+
+kind-down:
+	deploy/kind/down.sh
+
+# Create an app inside the cluster and print its key once:  make kind-app NAME=demo ARGS="--rpm 0"
+kind-app:
+	@[ -n "$(NAME)" ] || { echo "usage: make kind-app NAME=demo"; exit 2; }
+	$(KUBECTL) exec deploy/gateway -- /usr/local/bin/mkapp --name "$(NAME)" $(ARGS)
+
+# Level 7 check: delete a gateway pod in the middle of a 60 s load test (needs `make kind-up-mock`).
+kind-drill:
+	deploy/kind/drill.sh

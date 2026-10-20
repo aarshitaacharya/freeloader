@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Service
+metadata: {name: postgres}
+spec:
+  clusterIP: None
+  selector: {app: postgres}
+  ports: [{name: pg, port: 5432}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: postgres}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports: [{name: pg, containerPort: 5432}]
+          env:
+            - {name: POSTGRES_USER, value: freeloader}
+            - {name: POSTGRES_DB, value: freeloader}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: freeloader-secrets, key: POSTGRES_PASSWORD}}
+          readinessProbe:
+            exec: {command: [pg_isready, -U, freeloader, -d, freeloader]}
+            periodSeconds: 3
+          livenessProbe:
+            exec: {command: [pg_isready, -U, freeloader, -d, freeloader]}
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 1Gi}}

@@ -1,0 +1,19 @@
+# Single-broker Redpanda for the dev cluster:
+#   helm upgrade --install redpanda redpanda/redpanda -n freeloader -f deploy/k8s/redpanda-values.yaml
+statefulset:
+  replicas: 1
+tls:
+  enabled: false
+external:
+  enabled: false
+console:
+  enabled: false
+resources:
+  cpu: {cores: 1}
+  memory:
+    container: {max: 1.5Gi}
+storage:
+  persistentVolume:
+    size: 2Gi
+logging:
+  logLevel: info

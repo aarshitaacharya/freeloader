@@ -1,0 +1,19 @@
+# Runs before the gateway, ledger and guard are rolled out (deploy/kind/up.sh waits for it).
+apiVersion: batch/v1
+kind: Job
+metadata: {name: migrate}
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.18.3
+          args: ["-path=/migrations", "-database=$(DATABASE_URL)", "up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: freeloader-secrets, key: DATABASE_URL}}
+          volumeMounts: [{name: migrations, mountPath: /migrations, readOnly: true}]
+      volumes:
+        - {name: migrations, configMap: {name: freeloader-migrations}}

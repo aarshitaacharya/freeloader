@@ -62,3 +62,18 @@ jobs:
         working-directory: ledger
       - run: go test -tags integration -race -count=1 -timeout 300s ./...
         working-directory: guard
+
+  k8s-manifests:
+    name: kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+      - name: render and validate both overlays
+        run: |
+          for o in dev mock; do
+            kubectl kustomize deploy/k8s/overlays/$o | ./kubeconform -strict -summary -kubernetes-version 1.33.0 -
+          done
+      - run: bash -n deploy/kind/up.sh deploy/kind/down.sh deploy/kind/drill.sh

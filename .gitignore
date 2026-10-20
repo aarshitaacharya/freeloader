@@ -5,3 +5,4 @@ build/
 !.env.example
 node_modules/
 config/providers.yaml
+.bin/

@@ -1,0 +1,31 @@
+# Two replicas in one consumer group: Kafka splits the 6 partitions between them.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: ledger, labels: {tier: app}}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: ledger}}
+  template:
+    metadata:
+      labels: {app: ledger}
+      annotations: {prometheus.io/scrape: "true", prometheus.io/port: "9101"}
+    spec:
+      terminationGracePeriodSeconds: 30   # lets the final batch commit before exit
+      containers:
+        - name: ledger
+          image: fl-ledger:dev
+          imagePullPolicy: IfNotPresent
+          ports: [{name: metrics, containerPort: 9101}]
+          env:
+            - {name: FL_KAFKA_BROKERS, value: "redpanda:9093"}
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: freeloader-secrets, key: DATABASE_URL}}
+          readinessProbe:
+            httpGet: {path: /readyz, port: metrics}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}

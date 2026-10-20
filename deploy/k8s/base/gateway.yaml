@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: Service
+metadata: {name: gateway, labels: {tier: app}}
+spec:
+  selector: {app: gateway}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: gateway, labels: {tier: app}}
+spec:
+  minAvailable: 2
+  selector: {matchLabels: {app: gateway}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: gateway, labels: {tier: app}}
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector: {matchLabels: {app: gateway}}
+  template:
+    metadata:
+      labels: {app: gateway}
+      annotations: {prometheus.io/scrape: "true", prometheus.io/port: "8080"}
+    spec:
+      # In-flight streams get up to 20 s (the gateway's own shutdown limit) plus the preStop wait.
+      terminationGracePeriodSeconds: 40
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app: gateway}}
+      containers:
+        - name: gateway
+          image: fl-gateway:dev
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: FL_CACHE_ADDR, value: "fl-cache:6400"}
+            - {name: FL_KAFKA_BROKERS, value: "redpanda:9093"}
+            - {name: FL_CONFIG, value: /etc/freeloader/providers.yaml}
+          envFrom:
+            - secretRef: {name: freeloader-secrets}
+          volumeMounts: [{name: config, mountPath: /etc/freeloader, readOnly: true}]
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          lifecycle:
+            # The endpoint is removed from the Service and the process gets SIGTERM at the same
+            # time. Keep serving for a few seconds so requests already routed here still succeed.
+            preStop:
+              sleep: {seconds: 5}   # native action; the image is distroless, so there is no sleep binary
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {memory: 256Mi}
+      volumes:
+        - {name: config, configMap: {name: freeloader-config}}
