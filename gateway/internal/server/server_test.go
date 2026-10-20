@@ -666,3 +666,53 @@ func TestMethodNotAllowed(t *testing.T) {
 	h := newHarness(t, defaultApp(), 3)
 	wantStatus(t, h.do("GET", "/v1/chat/completions", "", nil), 405)
 }
+
+func TestCooldownAfterPersistentFailures(t *testing.T) {
+	tests := []struct {
+		status       int
+		wantCooldown bool
+	}{
+		{429, true}, {401, true}, {402, true}, {403, true},
+		{500, false}, {503, false}, {404, false},
+	}
+	for _, tc := range tests {
+		t.Run(itoa(tc.status), func(t *testing.T) {
+			h := newHarness(t, defaultApp(), 3)
+			h.ups["a"].set(replyStatus(tc.status))
+			wantStatus(t, h.chat(nondet), 200) // fails over to b
+			wantStatus(t, h.chat(nondet), 200)
+			a, _, _ := h.calls()
+			if tc.wantCooldown && a != 1 {
+				t.Errorf("a was called %d times; after a %d it should be skipped for the cooldown", a, tc.status)
+			}
+			if !tc.wantCooldown && a != 2 {
+				t.Errorf("a was called %d times; a %d should not start a cooldown", a, tc.status)
+			}
+		})
+	}
+}
+
+func TestHungProviderCostsOneTimeoutNotOnePerRequest(t *testing.T) {
+	h := newHarness(t, defaultApp(), 3)
+	h.ups["a"].set(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	})
+	h.router.Provider("a").Timeout = 150 * time.Millisecond
+
+	start := time.Now()
+	wantStatus(t, h.chat(nondet), 200) // pays the timeout once
+	first := time.Since(start)
+	start = time.Now()
+	wantStatus(t, h.chat(nondet), 200)
+	second := time.Since(start)
+	if first < 150*time.Millisecond {
+		t.Errorf("first request took %v; expected it to wait out a's timeout", first)
+	}
+	if second > 100*time.Millisecond {
+		t.Errorf("second request took %v; a is cooling down and should be skipped", second)
+	}
+	if a, _, _ := h.calls(); a != 1 {
+		t.Errorf("a was called %d times, want 1", a)
+	}
+}

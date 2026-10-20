@@ -60,12 +60,26 @@ func (s *Server) callWithFailover(ctx context.Context, targets []config.Target, 
 			f.passthrough = true
 			return nil, "", attempts, f
 		}
-		if perr.Status == http.StatusTooManyRequests {
+		if cooldownWorthy(perr) {
 			s.Router.StartCooldown(t.Provider)
 		}
 		prev = t.Provider
 	}
 	return nil, "", attempts, f
+}
+
+// cooldownWorthy: failures where trying the same provider again straight away is
+// pointless, so this replica stops routing to it for the cooldown period. That is
+// 429 (rate limited, per the spec), but also a rejected or unfunded key
+// (401/402/403) and a timeout: a hung provider would otherwise cost every
+// request a full attempt timeout. Plain 5xx are not included: they are often
+// momentary, and failing fast on them is cheap.
+func cooldownWorthy(e *provider.Error) bool {
+	switch e.Status {
+	case http.StatusTooManyRequests, http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden:
+		return true
+	}
+	return e.Status == 0 && errors.Is(e.Err, context.DeadlineExceeded)
 }
 
 func (s *Server) writeFailure(w http.ResponseWriter, targets []config.Target, attempts int, f failure) {

@@ -58,10 +58,11 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Err }
 
 // failoverStatus: 429 and 5xx per the spec, plus 401/403 (a revoked or wrong key
-// is ours to fix, not the client's), 404 (model retired) and 408.
+// is ours to fix, not the client's), 402 (the provider account has no credit),
+// 404 (model retired) and 408.
 func failoverStatus(code int) bool {
 	switch code {
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusNotFound,
 		http.StatusRequestTimeout, http.StatusTooManyRequests:
 		return true
 	}

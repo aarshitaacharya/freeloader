@@ -1,8 +1,8 @@
 # Copy to config/providers.yaml (gitignored) and adjust. No secrets here:
 # API keys are read from the environment variables named in `api_key_env`.
 #
-# Model IDs below came from each provider's docs on 2026-10-19 and change often.
-# Verify them against your own keys before relying on them, e.g.:
+# Model IDs below were checked against each provider's live /models endpoint on 2026-10-19 and
+# change often. Verify them against your own keys before relying on them, e.g.:
 #   curl -s https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"
 
 server:
@@ -25,6 +25,9 @@ providers:
   gemini:
     base_url: https://generativelanguage.googleapis.com/v1beta/openai
     api_key_env: GEMINI_API_KEY
+    # Free-tier notes (observed with a free AI Studio key, 2026-10-19): gemini-3.8-flash and
+    # gemini-3-flash-preview hung with no response; the 3.1-pro/pro-latest models returned 429 (no free quota);
+    # 2.5 models are retired (404). A key from a project with billing enabled but no credit returns 402.
     # Per-model free limits are only shown in the AI Studio dashboard
     # (https://aistudio.google.com/rate-limit). RPD resets at midnight Pacific.
     limits: {}
@@ -41,12 +44,12 @@ providers:
 aliases:
   fast:
     - {provider: groq,       model: openai/gpt-oss-20b}
-    - {provider: gemini,     model: gemini-3.8-flash}
+    - {provider: gemini,     model: gemini-3.1-flash-lite}
     - {provider: openrouter, model: "minimax/minimax-m3.1-flash:free"}
   smart:
     - {provider: groq,       model: openai/gpt-oss-120b}
-    - {provider: gemini,     model: gemini-3.8-flash}
+    - {provider: gemini,     model: gemini-3.5-flash}
     - {provider: openrouter, model: "xingchen-agi/xing4.0-29b-a4b:free"}
   vision:
-    - {provider: gemini,     model: gemini-3.8-flash}
+    - {provider: gemini,     model: gemini-3.1-flash-lite}
     - {provider: openrouter, model: "nvidia/nemotron-3.5-super-vl:free"}

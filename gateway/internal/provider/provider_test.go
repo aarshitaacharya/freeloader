@@ -66,7 +66,7 @@ func TestErrorClassification(t *testing.T) {
 		failover bool
 	}{
 		{429, true}, {500, true}, {502, true}, {503, true},
-		{401, true}, {403, true}, {404, true}, {408, true},
+		{401, true}, {402, true}, {403, true}, {404, true}, {408, true},
 		{400, false}, {422, false}, {413, false},
 	}
 	for _, tc := range tests {
