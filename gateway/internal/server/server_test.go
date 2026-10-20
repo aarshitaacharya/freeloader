@@ -727,3 +727,24 @@ func TestHungProviderCostsOneTimeoutNotOnePerRequest(t *testing.T) {
 		t.Errorf("a was called %d times, want 1", a)
 	}
 }
+
+func TestAdminMountedOnlyWhenConfigured(t *testing.T) {
+	h := newHarness(t, defaultApp(), 3)
+	if got := h.do("GET", "/admin/apps", "", nil).status; got != http.StatusNotFound {
+		t.Errorf("admin not configured: got %d, want 404", got)
+	}
+
+	var hit string
+	h = newHarnessWith(t, defaultApp(), 3, func(d *Deps) {
+		d.Admin = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = r.URL.Path; w.WriteHeader(http.StatusTeapot) })
+	})
+	if got := h.do("GET", "/admin/apps", "", nil).status; got != http.StatusTeapot || hit != "/admin/apps" {
+		t.Errorf("admin configured: got %d (hit %q)", got, hit)
+	}
+	// An app's API key is not an admin credential; that check lives in the admin handler,
+	// but the model endpoints must keep working beside it.
+	if got := h.do("POST", "/v1/chat/completions", `{"model":"fast","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer " + testKey}).status; got != http.StatusOK {
+		t.Errorf("chat with admin mounted: got %d", got)
+	}
+}

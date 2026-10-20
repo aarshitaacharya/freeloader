@@ -86,3 +86,26 @@ jobs:
           python3 tools/dashboard/gen.py
           git diff --exit-code deploy/k8s/monitoring/freeloader-dashboard.json
       - run: for f in deploy/kind/*.sh; do bash -n "$f"; done
+
+  panel:
+    name: panel (types, strict tsc, lint, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: panel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: panel/package-lock.json
+      - run: npm ci
+      - name: generated API types match api/openapi.yaml
+        run: npm run check:api
+      - name: strict typecheck, no any (tsc + eslint)
+        run: npm run typecheck && npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: image builds
+        run: docker build -t fl-panel:ci .

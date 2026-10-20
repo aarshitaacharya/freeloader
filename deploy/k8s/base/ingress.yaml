@@ -1,4 +1,5 @@
-# /v1 -> gateway. /admin -> gateway too; the admin API itself arrives in level 9, until then it 404s.
+# /v1 and /admin -> gateway, everything else -> the control panel.
+# ingress-nginx picks the longest matching prefix, so "/" is only the fallback.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -14,3 +15,4 @@ spec:
         paths:
           - {path: /v1, pathType: Prefix, backend: {service: {name: gateway, port: {name: http}}}}
           - {path: /admin, pathType: Prefix, backend: {service: {name: gateway, port: {name: http}}}}
+          - {path: /, pathType: Prefix, backend: {service: {name: panel, port: {name: http}}}}

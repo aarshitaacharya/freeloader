@@ -36,6 +36,8 @@ type Deps struct {
 	MaxAttempts int
 	Now         func() time.Time
 
+	Admin http.Handler // serves /admin/*; nil = not mounted (404)
+
 	Events            events.Publisher // nil = events disabled
 	StreamIdleTimeout time.Duration    // max silence between chunks of a stream; default 60 s
 }
@@ -64,6 +66,9 @@ func New(d Deps) *Server {
 	s := &Server{Deps: d, mux: http.NewServeMux()}
 	s.mux.HandleFunc("POST /v1/chat/completions", s.handleChat)
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
+	if d.Admin != nil {
+		s.mux.Handle("/admin/", d.Admin)
+	}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	s.mux.HandleFunc("GET /readyz", s.handleReady)
 	s.mux.Handle("GET /metrics", promhttp.HandlerFor(d.Metrics.Reg, promhttp.HandlerOpts{}))

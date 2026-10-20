@@ -47,17 +47,25 @@ COMPOSE_MOCK := $(COMPOSE) -f deploy/compose/docker-compose.mock.yml
 
 .PHONY: init up up-mock down logs app gateway-test gateway-integration check-hit-latency check-openai-client ledger-replay
 
+# Generates ADMIN_TOKEN in .env when it is missing or empty (the admin API stays off without it).
+define ensure_admin_token
+	@grep -q '^ADMIN_TOKEN=.' .env || { grep -v '^ADMIN_TOKEN=' .env > .env.tmp; echo "ADMIN_TOKEN=$$(openssl rand -hex 24)" >> .env.tmp; mv .env.tmp .env; echo "generated ADMIN_TOKEN in .env"; }
+endef
+
 init:  ## create local config and .env from the examples (never overwrites)
 	@[ -f config/providers.yaml ] || cp config/providers.example.yaml config/providers.yaml
 	@[ -f .env ] || cp .env.example .env
+	$(ensure_admin_token)
 	@echo "edit .env to add provider API keys (it is gitignored)"
 
 up: init
 	$(COMPOSE) up -d --build
+	@echo "panel: http://127.0.0.1:$$(grep '^PANEL_PORT=' .env | cut -d= -f2 | grep . || echo 3001)  (admin token is ADMIN_TOKEN in .env)"
 
 # Same stack, but with a local fake provider instead of Groq/Gemini/OpenRouter (no API keys needed).
 up-mock:
 	@[ -f .env ] || cp .env.example .env
+	$(ensure_admin_token)
 	$(COMPOSE_MOCK) up -d --build
 
 down:
@@ -147,3 +155,19 @@ kind-grafana:
 
 dashboard:
 	python3 tools/dashboard/gen.py
+
+# ---- Level 9: control panel (needs Node 22+) ----
+.PHONY: panel-install panel-dev panel-check panel-api
+panel-install:
+	cd panel && npm ci
+
+# Dev server on http://localhost:5173, proxying /admin to the Compose gateway (GATEWAY_URL overrides).
+panel-dev: panel-install
+	cd panel && npm run dev
+
+# What CI runs: types regenerated from api/openapi.yaml, strict tsc, lint (no any), tests, production build.
+panel-check: panel-install
+	cd panel && npm run check:api && npm run lint && npm test && npm run build
+
+panel-api:  ## regenerate panel/src/api/schema.d.ts after editing api/openapi.yaml
+	cd panel && npm run gen:api

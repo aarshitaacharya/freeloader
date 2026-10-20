@@ -6,8 +6,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -31,11 +29,10 @@ func main() {
 		os.Exit(2)
 	}
 
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
+	key, keyHash, err := auth.GenerateKey()
+	if err != nil {
 		fatal(err)
 	}
-	key := auth.KeyPrefix + hex.EncodeToString(buf)
 
 	prio := []string{}
 	if *priority != "" {
@@ -52,7 +49,7 @@ func main() {
 	_, err = pool.Exec(ctx, `
 		INSERT INTO apps (name, key_hash, rpm_limit, tokens_per_day, cache_ttl_s, provider_priority, cache_all)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		*name, auth.HashKey(key), *rpm, *tokens, *ttl, prioJSON, *cacheAll)
+		*name, keyHash, *rpm, *tokens, *ttl, prioJSON, *cacheAll)
 	if err != nil {
 		fatal(err)
 	}

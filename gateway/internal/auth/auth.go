@@ -3,6 +3,7 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -39,6 +40,16 @@ const KeyPrefix = "fl_"
 type Store interface {
 	LookupByKeyHash(ctx context.Context, hash []byte) (*App, error) // ErrNotFound if none
 	Ping(ctx context.Context) error
+}
+
+// GenerateKey makes a new random API key and returns it with its stored hash.
+func GenerateKey() (key string, hash []byte, err error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", nil, err
+	}
+	key = KeyPrefix + hex.EncodeToString(buf)
+	return key, HashKey(key), nil
 }
 
 // HashKey is how keys are stored: SHA-256, never the key itself.

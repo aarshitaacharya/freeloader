@@ -1,0 +1,266 @@
+openapi: 3.0.3
+info:
+  title: Freeloader admin API
+  version: 1.0.0
+  description: |
+    JSON API behind the control panel. Served by every gateway replica under `/admin`.
+
+    Authentication: `Authorization: Bearer <ADMIN_TOKEN>`. If the gateway has no `ADMIN_TOKEN`
+    configured, `/admin` is not mounted and answers 404.
+
+    Changes to an app (limits, disabled) reach each gateway replica within 30 seconds, because
+    replicas cache app lookups for that long.
+servers:
+  - url: /
+security:
+  - adminToken: []
+paths:
+  /admin/apps:
+    get:
+      operationId: listApps
+      summary: List apps
+      responses:
+        "200":
+          description: All apps, oldest first. Key hashes are never returned.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AppList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    post:
+      operationId: createApp
+      summary: Create an app and its API key
+      description: The key is returned once, in this response, and is not stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NewApp"}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreatedApp"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409":
+          description: An app with that name exists.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /admin/apps/{id}:
+    patch:
+      operationId: updateApp
+      summary: Change limits, cache TTL, provider priority or disabled state
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AppPatch"}
+      responses:
+        "200":
+          description: The updated app.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/App"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404":
+          description: No such app.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /admin/usage:
+    get:
+      operationId: getUsage
+      summary: Daily usage per app and provider
+      description: |
+        Rows come from the `usage_daily` rollup, which fl-ledger fills from the usage events, so
+        they trail live traffic by the ledger's commit interval. Days are UTC days.
+        `requests` includes cache hits; cache hit rate = `cache_hits / requests`.
+      parameters:
+        - name: from
+          in: query
+          description: First day, inclusive. Default is 6 days before `to`.
+          schema: {type: string, format: date}
+        - name: to
+          in: query
+          description: Last day, inclusive. Default is today (UTC).
+          schema: {type: string, format: date}
+        - name: app_id
+          in: query
+          schema: {type: integer, format: int64}
+      responses:
+        "200":
+          description: Usage rows, ordered by day then app then provider.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Usage"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /admin/providers:
+    get:
+      operationId: listProviders
+      summary: Provider status and today's burn against its limits
+      description: |
+        `cooling_down` is the answering replica's own view: cooldowns are kept per replica, so
+        another replica may still be routing to that provider. `exhausted` comes from the flag
+        fl-guard sets in fl-cache. Counters are fl-guard's, in the provider's own day.
+      responses:
+        "200":
+          description: One entry per configured provider.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProviderList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "503":
+          description: fl-cache is unreachable, so the counters cannot be read. Zeros are never made up.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+components:
+  securitySchemes:
+    adminToken:
+      type: http
+      scheme: bearer
+  responses:
+    Unauthorized:
+      description: Missing or wrong admin token.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    BadRequest:
+      description: The request was not valid.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+    App:
+      type: object
+      required: [id, name, rpm_limit, tokens_per_day, cache_ttl_s, provider_priority, cache_all, disabled, created_at]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        rpm_limit: {type: integer, minimum: 0, description: "Requests per minute; 0 = unlimited."}
+        tokens_per_day: {type: integer, format: int64, minimum: 0, description: "0 = unlimited."}
+        cache_ttl_s: {type: integer, minimum: 0, description: "Response cache lifetime; 0 = no caching."}
+        provider_priority:
+          type: array
+          items: {type: string}
+          description: Provider names tried first, in order. Empty = each alias's default order.
+        cache_all: {type: boolean, description: "Also cache requests whose temperature is not 0."}
+        disabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+    AppList:
+      type: object
+      required: [apps]
+      properties:
+        apps:
+          type: array
+          items: {$ref: "#/components/schemas/App"}
+    NewApp:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 64}
+        rpm_limit: {type: integer, minimum: 0, default: 60}
+        tokens_per_day: {type: integer, format: int64, minimum: 0, default: 100000}
+        cache_ttl_s: {type: integer, minimum: 0, default: 86400}
+        provider_priority:
+          type: array
+          items: {type: string}
+        cache_all: {type: boolean, default: false}
+    AppPatch:
+      type: object
+      description: Only the fields present are changed.
+      properties:
+        rpm_limit: {type: integer, minimum: 0}
+        tokens_per_day: {type: integer, format: int64, minimum: 0}
+        cache_ttl_s: {type: integer, minimum: 0}
+        provider_priority:
+          type: array
+          items: {type: string}
+        cache_all: {type: boolean}
+        disabled: {type: boolean}
+    CreatedApp:
+      type: object
+      required: [app, key]
+      properties:
+        app: {$ref: "#/components/schemas/App"}
+        key: {type: string, description: "The API key. Shown once."}
+    UsageRow:
+      type: object
+      required: [day, app_id, app_name, provider, requests, tokens, cache_hits]
+      properties:
+        day: {type: string, format: date}
+        app_id: {type: integer, format: int64}
+        app_name: {type: string, description: "Empty if the app was deleted."}
+        provider: {type: string, description: "Empty when no provider answered (for example cache hits and errors)."}
+        requests: {type: integer, format: int64}
+        tokens: {type: integer, format: int64}
+        cache_hits: {type: integer, format: int64}
+    Usage:
+      type: object
+      required: [from, to, rows]
+      properties:
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        rows:
+          type: array
+          items: {$ref: "#/components/schemas/UsageRow"}
+    Limits:
+      type: object
+      description: Daily limits from the provider config. 0 = not configured.
+      required: [requests_per_day, tokens_per_day]
+      properties:
+        requests_per_day: {type: integer, format: int64}
+        tokens_per_day: {type: integer, format: int64}
+    ModelStatus:
+      type: object
+      required: [model, requests_today, tokens_today, limits, exhausted]
+      properties:
+        model: {type: string}
+        requests_today: {type: integer, format: int64}
+        tokens_today: {type: integer, format: int64}
+        limits: {$ref: "#/components/schemas/Limits"}
+        exhausted: {type: boolean}
+    ProviderStatus:
+      type: object
+      required: [name, state, cooldown_remaining_s, reset_timezone, resets_at, requests_today, tokens_today, limits, models]
+      properties:
+        name: {type: string}
+        state:
+          type: string
+          enum: [healthy, cooling_down, exhausted, no_api_key]
+        cooldown_remaining_s: {type: integer, description: "Seconds left on this replica's cooldown; 0 if none."}
+        reset_timezone: {type: string}
+        resets_at: {type: string, format: date-time, description: "Next midnight in the provider's timezone."}
+        requests_today: {type: integer, format: int64, description: "Provider-wide counter; 0 unless a provider-wide limit is configured."}
+        tokens_today: {type: integer, format: int64}
+        limits: {$ref: "#/components/schemas/Limits"}
+        models:
+          type: array
+          description: Models that have their own daily limit.
+          items: {$ref: "#/components/schemas/ModelStatus"}
+    ProviderList:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items: {$ref: "#/components/schemas/ProviderStatus"}

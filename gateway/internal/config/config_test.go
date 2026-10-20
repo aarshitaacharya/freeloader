@@ -76,3 +76,29 @@ func TestCacheAddrEnvOverride(t *testing.T) {
 		t.Errorf("addr = %q", c.Cache.Addr)
 	}
 }
+
+func TestResetTimezoneAndModels(t *testing.T) {
+	c, err := Load("../../../config/providers.example.yaml", env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Providers["gemini"].Loc.String(); got != "America/Los_Angeles" {
+		t.Errorf("gemini reset timezone = %q", got)
+	}
+	if got := c.Providers["groq"].Loc.String(); got != "UTC" {
+		t.Errorf("a provider without a timezone should default to UTC, got %q", got)
+	}
+	if len(c.Providers["groq"].Models) == 0 {
+		t.Error("per-model limits were not parsed")
+	}
+
+	bad := `
+providers:
+  p: {base_url: "http://x", reset: {timezone: "Mars/Olympus"}}
+aliases:
+  a: [{provider: p, model: m}]
+`
+	if _, err := Parse([]byte(bad), env(nil)); err == nil || !strings.Contains(err.Error(), "timezone") {
+		t.Errorf("invalid timezone should be rejected, got %v", err)
+	}
+}

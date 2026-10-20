@@ -44,8 +44,19 @@ type Provider struct {
 	APIKeyEnv string `yaml:"api_key_env"`
 	Limits    Limits `yaml:"limits"`
 
+	// Read by the admin API (provider status) and by fl-guard, which enforces them.
+	Reset  Reset             `yaml:"reset"`
+	Models map[string]Limits `yaml:"models"` // per-model limits
+
+	Loc *time.Location `yaml:"-"` // from Reset.Timezone
+
 	// APIKey is read from the environment named by APIKeyEnv; never from YAML.
 	APIKey string `yaml:"-"`
+}
+
+// Reset says when the provider's daily quota rolls over.
+type Reset struct {
+	Timezone string `yaml:"timezone"` // IANA name; default UTC
 }
 
 // Limits are the provider's free-tier limits. Zero means "not configured".
@@ -121,6 +132,13 @@ func Parse(raw []byte, getenv func(string) string) (*Config, error) {
 		}
 		if p.APIKeyEnv != "" {
 			p.APIKey = getenv(p.APIKeyEnv)
+		}
+		tz := p.Reset.Timezone
+		if tz == "" {
+			tz = "UTC"
+		}
+		if p.Loc, err = time.LoadLocation(tz); err != nil {
+			return nil, fmt.Errorf("config: provider %q has an invalid reset timezone %q: %w", name, tz, err)
 		}
 		c.Providers[name] = p
 	}

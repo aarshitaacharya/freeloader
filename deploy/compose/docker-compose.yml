@@ -75,6 +75,16 @@ services:
       # Topic must exist before events flow. The gateway itself starts fine without a broker.
       redpanda-init: {condition: service_completed_successfully}
 
+  # Control panel: static files, with /admin proxied to the gateway (same origin, no CORS).
+  panel:
+    build: {context: ../../panel}
+    image: fl-panel:dev
+    environment:
+      GATEWAY_UPSTREAM: http://gateway:8080
+    ports: ["127.0.0.1:${PANEL_PORT:-3001}:8080"]
+    depends_on:
+      gateway: {condition: service_started}
+
   # Two replicas of the same consumer group: Kafka splits the 6 partitions between them.
   ledger:
     build: {context: ../../ledger}

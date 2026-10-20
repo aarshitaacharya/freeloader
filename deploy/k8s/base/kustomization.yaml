@@ -10,6 +10,7 @@ resources:
   - gateway.yaml
   - ledger.yaml
   - guard.yaml
+  - panel.yaml
   - ingress.yaml
 # Created by deploy/kind/up.sh from local files, never committed:
 #   Secret    freeloader-secrets  provider keys, ADMIN_TOKEN, POSTGRES_PASSWORD, DATABASE_URL

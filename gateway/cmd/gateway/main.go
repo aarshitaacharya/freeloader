@@ -11,7 +11,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // provider reset timezones work in the distroless image
 
+	"github.com/aarshitaacharya/freeloader/gateway/internal/admin"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/auth"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/cache"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/config"
@@ -84,11 +86,25 @@ func run(log *slog.Logger) error {
 		log.Warn("usage events disabled: set FL_KAFKA_BROKERS or events.brokers")
 	}
 
+	router := route.New(cfg.Aliases, providers, kv, cfg.Server.Cooldown)
+	var adminAPI http.Handler
+	if token := os.Getenv("ADMIN_TOKEN"); token != "" {
+		h, err := admin.New(token, admin.PGStore{Pool: pool}, &admin.Providers{Cfg: cfg.Providers, Router: router, KV: kv}, log)
+		if err != nil {
+			return err
+		}
+		adminAPI = h
+		log.Info("admin API enabled at /admin")
+	} else {
+		log.Warn("admin API disabled: set ADMIN_TOKEN to enable /admin")
+	}
+
 	srv := server.New(server.Deps{
+		Admin:       adminAPI,
 		Auth:        auth.New(auth.PGStore{Pool: pool}, 30*time.Second),
 		Limiter:     ratelimit.New(kv),
 		KV:          kv,
-		Router:      route.New(cfg.Aliases, providers, kv, cfg.Server.Cooldown),
+		Router:      router,
 		Metrics:     m,
 		Log:         log,
 		MaxAttempts: cfg.Server.MaxAttempts,

@@ -20,11 +20,19 @@ if ! kind get clusters 2>/dev/null | grep -qx freeloader; then
 fi
 
 # 2. images (same Dockerfiles as Compose), loaded straight into the nodes
-docker build -q -t fl-gateway:dev gateway
-docker build -q -t fl-ledger:dev ledger
-docker build -q -t fl-guard:dev guard
-docker build -q -t fl-cache:dev -f cache/Dockerfile .
-kind load docker-image --name freeloader fl-gateway:dev fl-ledger:dev fl-guard:dev fl-cache:dev
+RESTART=()   # deployments whose image changed: the :dev tag never changes, so they must be restarted
+build() {    # build NAME DEPLOYMENT [docker build args...]
+  local name=$1 dep=$2; shift 2
+  local before; before=$(docker images -q "$name:dev" 2>/dev/null || true)
+  docker build -q -t "$name:dev" "$@" >/dev/null
+  [ "$(docker images -q "$name:dev")" = "$before" ] || RESTART+=("deploy/$dep")
+}
+build fl-gateway gateway gateway
+build fl-ledger  ledger  ledger
+build fl-guard   guard   guard
+build fl-cache   fl-cache -f cache/Dockerfile .
+build fl-panel   panel   panel
+kind load docker-image --name freeloader fl-gateway:dev fl-ledger:dev fl-guard:dev fl-cache:dev fl-panel:dev
 
 # 3. ingress controller
 $K apply -f "https://raw.githubusercontent.com/kubernetes/ingress-nginx/${INGRESS_NGINX}/deploy/static/provider/kind/deploy.yaml" >/dev/null
@@ -62,14 +70,19 @@ helm upgrade --install redpanda redpanda/redpanda -n $NS -f deploy/k8s/redpanda-
 
 # 6. data layer and migrations first, then the services that need the schema
 OVERLAY=deploy/k8s/overlays/dev; [ $MOCK = 1 ] && OVERLAY=deploy/k8s/overlays/mock
+FRESH=0; $K -n $NS get deploy/gateway >/dev/null 2>&1 || FRESH=1
 $K delete job migrate topic-init -n $NS --ignore-not-found >/dev/null   # Jobs are immutable; rerun them
 $K apply -k $OVERLAY -l 'tier!=app' >/dev/null
 $K -n $NS rollout status statefulset/postgres --timeout=180s
 $K -n $NS wait --for=condition=complete job/migrate job/topic-init --timeout=240s
 $K apply -k $OVERLAY >/dev/null
-# config is read at startup, so a changed providers.yaml needs a restart
-if [ "$CFG_CHANGED" != 0 ]; then $K -n $NS rollout restart deploy/gateway deploy/guard >/dev/null; fi
-for d in fl-cache gateway ledger guard; do $K -n $NS rollout status deploy/$d --timeout=240s; done
+# config is read at startup, so a changed providers.yaml needs a restart; so does a rebuilt image
+[ "$CFG_CHANGED" = 0 ] || RESTART+=(deploy/gateway deploy/guard)
+if [ "$FRESH" = 0 ] && [ ${#RESTART[@]} -gt 0 ]; then   # a first deploy already runs the new images
+  printf '%s\n' "${RESTART[@]}" | sort -u | xargs $K -n $NS rollout restart >/dev/null
+fi
+for d in fl-cache gateway ledger guard panel; do $K -n $NS rollout status deploy/$d --timeout=240s; done
 
 echo
-echo "up. gateway: http://127.0.0.1:8090/v1   (create an app: make kind-app NAME=demo)"
+echo "up. gateway: http://127.0.0.1:8090/v1   panel: http://127.0.0.1:8090/   (create an app: make kind-app NAME=demo)"
+echo "admin token: kubectl --context kind-freeloader -n $NS get secret freeloader-secrets -o jsonpath='{.data.ADMIN_TOKEN}' | base64 -d"

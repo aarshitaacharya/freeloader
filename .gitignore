@@ -4,5 +4,6 @@ build/
 .env*
 !.env.example
 node_modules/
+dist/
 config/providers.yaml
 .bin/
