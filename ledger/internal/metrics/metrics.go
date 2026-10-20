@@ -1,7 +1,10 @@
 // Package metrics holds fl-ledger's Prometheus metrics.
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+)
 
 type Metrics struct {
 	Reg        *prometheus.Registry
@@ -31,6 +34,8 @@ func New() *Metrics {
 			Name: "fl_ledger_batch_seconds", Help: "Time to write one batch to Postgres.",
 			Buckets: []float64{.001, .0025, .005, .01, .025, .05, .1, .25, .5, 1, 2.5}}),
 	}
+	// process_start_time_seconds lets the dashboard show a restarted pod; Go/process stats come free.
+	m.Reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}), collectors.NewGoCollector())
 	m.Reg.MustRegister(m.Events, m.Duplicates, m.Invalid, m.DBErrors, m.Lag, m.Batch)
 	return m
 }

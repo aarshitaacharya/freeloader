@@ -101,6 +101,13 @@ panel("Connections", [('fl_cache_connections', "connections")], 18, 3, "short")
 panel("Evictions + expired /s", [('rate(fl_cache_evictions_total[1m])', "evicted"), ('rate(fl_cache_expired_total[1m])', "expired")], 21, 3, "ops")
 done_row()
 
+row("Pods")
+panel("Pod uptime (a line that restarts from 0 = a pod was replaced)", [
+    ('time() - process_start_time_seconds{job=~"gateway|ledger|guard"}', "{{job}} {{pod}}")], 0, 14, "s",
+    desc="From process_start_time_seconds. Deleting a pod ends its line and a new line starts at 0.")
+panel("Memory (RSS) by pod", [('process_resident_memory_bytes{job=~"gateway|ledger|guard"}', "{{job}} {{pod}}")], 14, 10, "bytes")
+done_row()
+
 dash = {"uid": "freeloader", "title": "Freeloader", "tags": ["freeloader"], "timezone": "browser",
         "schemaVersion": 39, "version": 1, "refresh": "10s", "time": {"from": "now-15m", "to": "now"},
         "panels": panels, "templating": {"list": []}, "annotations": {"list": []}}

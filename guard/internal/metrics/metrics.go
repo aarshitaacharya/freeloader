@@ -1,7 +1,10 @@
 // Package metrics holds fl-guard's Prometheus metrics.
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+)
 
 type Metrics struct {
 	Reg                                        *prometheus.Registry
@@ -34,6 +37,8 @@ func New() *Metrics {
 		ModelRequests:  g("fl_guard_model_requests_today", "Requests sent to a provider's model today.", "provider", "model"),
 		ModelExhausted: g("fl_guard_model_exhausted", "1 while the provider's model is flagged exhausted.", "provider", "model"),
 	}
+	// process_start_time_seconds lets the dashboard show a restarted pod; Go/process stats come free.
+	m.Reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}), collectors.NewGoCollector())
 	m.Reg.MustRegister(m.Events, m.Duplicates, m.Skipped, m.Invalid, m.Errors, m.Tokens, m.Requests,
 		m.Exhausted, m.ModelTokens, m.ModelRequests, m.ModelExhausted)
 	return m

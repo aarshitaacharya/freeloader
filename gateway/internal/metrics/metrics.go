@@ -2,7 +2,10 @@
 // low-cardinality: never request ids or user text.
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+)
 
 type Metrics struct {
 	Reg            *prometheus.Registry
@@ -49,6 +52,8 @@ func New() *Metrics {
 		CacheErrors: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "fl_gateway_cache_errors_total", Help: "fl-cache calls that failed; the request was served without cache or limits."}),
 	}
+	// process_start_time_seconds lets the dashboard show a restarted pod; Go/process stats come free.
+	m.Reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}), collectors.NewGoCollector())
 	m.Reg.MustRegister(m.Requests, m.Latency, m.CacheHits, m.Failovers, m.RateLimited,
 		m.UpstreamErrors, m.EventsDropped, m.CacheErrors)
 	return m
