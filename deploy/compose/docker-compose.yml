@@ -1,0 +1,48 @@
+# Daily-dev stack. From the repo root:  make init && make up
+name: freeloader
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: freeloader
+      POSTGRES_DB: freeloader
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-freeloader}
+    ports: ["127.0.0.1:5433:5432"]   # host port 5433 so it can't clash with a local Postgres
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U freeloader -d freeloader"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    command: ["-path=/migrations", "-database=postgres://freeloader:${POSTGRES_PASSWORD:-freeloader}@postgres:5432/freeloader?sslmode=disable", "up"]
+    volumes: ["../../migrations:/migrations:ro"]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  fl-cache:
+    build: {context: ../.., dockerfile: cache/Dockerfile}
+    image: fl-cache:dev
+    ports: ["127.0.0.1:6400:6400", "127.0.0.1:9400:9400"]
+
+  gateway:
+    build: {context: ../../gateway}
+    image: fl-gateway:dev
+    environment:
+      DATABASE_URL: postgres://freeloader:${POSTGRES_PASSWORD:-freeloader}@postgres:5432/freeloader?sslmode=disable
+      FL_CACHE_ADDR: fl-cache:6400
+      FL_CONFIG: /etc/freeloader/providers.yaml
+    env_file:
+      - path: ../../.env        # provider API keys; optional so `up` works before you have keys
+        required: false
+    volumes: ["../../config:/etc/freeloader:ro"]
+    ports: ["127.0.0.1:${GATEWAY_PORT:-8080}:8080"]   # set GATEWAY_PORT in .env if 8080 is taken
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      fl-cache: {condition: service_started}
+
+volumes:
+  pgdata:

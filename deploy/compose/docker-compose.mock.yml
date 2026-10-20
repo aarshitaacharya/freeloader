@@ -1,0 +1,15 @@
+# Offline overlay: swap the real providers for the local mock.
+#   make up-mock
+services:
+  mock-provider:
+    image: python:3.13-alpine
+    command: ["python", "-u", "/mock/mock_provider.py"]
+    volumes: ["../../tools/mock-provider:/mock:ro"]
+    ports: ["127.0.0.1:9000:9000"]
+
+  gateway:
+    environment:
+      FL_CONFIG: /etc/freeloader/providers.mock.yaml
+      MOCK_API_KEY: mock-key
+    depends_on:
+      mock-provider: {condition: service_started}

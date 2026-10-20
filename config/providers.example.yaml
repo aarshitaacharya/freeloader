@@ -1,0 +1,52 @@
+# Copy to config/providers.yaml (gitignored) and adjust. No secrets here:
+# API keys are read from the environment variables named in `api_key_env`.
+#
+# Model IDs below came from each provider's docs on 2026-10-19 and change often.
+# Verify them against your own keys before relying on them, e.g.:
+#   curl -s https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"
+
+server:
+  listen: ":8080"
+  max_attempts: 3          # providers tried per request
+  cooldown: 30s            # skip a provider for this long after it returns 429
+  attempt_timeout: 30s     # per upstream call
+
+cache:
+  addr: "localhost:6400"   # overridden by FL_CACHE_ADDR
+  timeout: 100ms           # per cache operation; on timeout the gateway serves without the cache
+
+providers:
+  groq:
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    # Free-tier limits are consumed by fl-guard (level 6). They are deliberately not filled in:
+    # read them from https://console.groq.com/settings/limits and enter them here.
+    limits: {}
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+    # Per-model free limits are only shown in the AI Studio dashboard
+    # (https://aistudio.google.com/rate-limit). RPD resets at midnight Pacific.
+    limits: {}
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    # From https://openrouter.ai/docs/api-reference/limits (':free' models):
+    # 20 requests/min; 50 requests/day, or 1000/day once at least $10 of credits has been purchased.
+    limits:
+      requests_per_minute: 20
+      requests_per_day: 50
+
+# Each alias is an ordered preference list. An app's provider_priority can reorder/filter it.
+aliases:
+  fast:
+    - {provider: groq,       model: openai/gpt-oss-20b}
+    - {provider: gemini,     model: gemini-3.8-flash}
+    - {provider: openrouter, model: "minimax/minimax-m3.1-flash:free"}
+  smart:
+    - {provider: groq,       model: openai/gpt-oss-120b}
+    - {provider: gemini,     model: gemini-3.8-flash}
+    - {provider: openrouter, model: "xingchen-agi/xing4.0-29b-a4b:free"}
+  vision:
+    - {provider: gemini,     model: gemini-3.8-flash}
+    - {provider: openrouter, model: "nvidia/nemotron-3.5-super-vl:free"}
