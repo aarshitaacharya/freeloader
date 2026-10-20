@@ -1,3 +1,4 @@
+#include <atomic>
 #include <charconv>
 #include <csignal>
 #include <cstring>
@@ -9,9 +10,10 @@
 #include "fl/server.hpp"
 
 namespace {
-fl::Server* g_server = nullptr;
+// Non-owning; cleared before the Server is destroyed so a late signal can't touch a dead object.
+std::atomic<fl::Server*> g_server{nullptr};
 void on_signal(int) {
-  if (g_server) g_server->stop();
+  if (fl::Server* s = g_server.load()) s->stop();
 }
 
 bool parse_num(const char* s, size_t& out) {
@@ -44,6 +46,9 @@ int main(int argc, char** argv) {
   try {
     fl::Server server(cfg);
     g_server = &server;
+    struct ClearOnExit {  // declared after `server`, so it runs before ~Server on every path
+      ~ClearOnExit() { g_server = nullptr; }
+    } clear_on_exit;
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
     std::signal(SIGPIPE, SIG_IGN);
