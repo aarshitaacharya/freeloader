@@ -45,7 +45,7 @@ bench-report: cache-image
 COMPOSE := docker compose $(if $(wildcard .env),--env-file .env) -f deploy/compose/docker-compose.yml
 COMPOSE_MOCK := $(COMPOSE) -f deploy/compose/docker-compose.mock.yml
 
-.PHONY: init up up-mock down logs app gateway-test gateway-integration check-hit-latency check-openai-client
+.PHONY: init up up-mock down logs app gateway-test gateway-integration check-hit-latency check-openai-client ledger-replay
 
 init:  ## create local config and .env from the examples (never overwrites)
 	@[ -f config/providers.yaml ] || cp config/providers.example.yaml config/providers.yaml
@@ -75,10 +75,14 @@ app:
 
 gateway-test:
 	cd gateway && go vet ./... && go test -race -count=1 ./...
+	cd ledger && go vet ./... && go test -race -count=1 ./...
+	cd guard && go vet ./... && go test -race -count=1 ./...
 
 gateway-integration:
 	docker build -q -t fl-cache:dev -f cache/Dockerfile .
 	cd gateway && go test -tags integration -race -count=1 -timeout 300s ./internal/integration/...
+	cd ledger && go test -tags integration -race -count=1 -timeout 300s ./...
+	cd guard && go test -tags integration -race -count=1 -timeout 300s ./...
 
 # Level 4 check: cache HITs answer in < 10 ms (run `make up-mock app NAME=demo` first, pass the key).
 check-hit-latency:
@@ -93,3 +97,8 @@ check-openai-client:
 	docker run --rm --network freeloader_default -e KEY=$(KEY) -e MODEL=$(or $(MODEL),fast) \
 	  -v $(CURDIR)/tools/checks:/checks:ro python:3.13-slim \
 	  sh -c "pip install -q --disable-pip-version-check openai >/dev/null 2>&1 && python -I /checks/openai_client_check.py"
+
+# Rebuild usage_events and usage_daily from the llm.usage topic (TRUNCATES them first).
+# Refuses to run while any ledger replica is up:  docker compose stop ledger
+ledger-replay:
+	$(COMPOSE) run --rm --no-deps ledger replay --confirm

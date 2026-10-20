@@ -5,6 +5,9 @@ server:
   cooldown: 30s
   attempt_timeout: 2s
 
+guard:
+  threshold: 0.9
+
 events:
   topic: llm.usage        # brokers come from FL_KAFKA_BROKERS
 
@@ -15,7 +18,12 @@ cache:
 providers:
   broken:  {base_url: "http://mock-provider:9000/broken/v1",  api_key_env: MOCK_API_KEY}
   limited: {base_url: "http://mock-provider:9000/limited/v1", api_key_env: MOCK_API_KEY}
-  ok:      {base_url: "http://mock-provider:9000/ok/v1",      api_key_env: MOCK_API_KEY}
+  ok:
+    base_url: "http://mock-provider:9000/ok/v1"
+    api_key_env: MOCK_API_KEY
+    reset: {timezone: UTC}
+    models:
+      mock-model: {requests_per_day: 1000}   # lower it (e.g. to 10) and restart the guard to watch it flag `ok`
   slow:    {base_url: "http://mock-provider:9000/slow/v1",    api_key_env: MOCK_API_KEY}
   nousage: {base_url: "http://mock-provider:9000/nousage/v1", api_key_env: MOCK_API_KEY}
   cutoff:  {base_url: "http://mock-provider:9000/cutoff/v1",  api_key_env: MOCK_API_KEY}

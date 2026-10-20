@@ -1,0 +1,15 @@
+{
+  "request_id": "01a15700-b914-7973-8b24-52324a8ae4e2",
+  "ts": "2026-10-20T01:50:27.749542952Z",
+  "app_id": 4,
+  "provider": "groq",
+  "model": "openai/gpt-oss-20b",
+  "alias": "fast",
+  "prompt_tokens": 77,
+  "completion_tokens": 49,
+  "tokens_estimated": false,
+  "latency_ms": 144,
+  "status": 200,
+  "cache_hit": false,
+  "attempts": 1
+}

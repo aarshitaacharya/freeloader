@@ -87,18 +87,18 @@ func TestSkipReasons(t *testing.T) {
 	r, now := newRouter(kv)
 	ctx := context.Background()
 
-	if reason, skip := r.Skip(ctx, "a"); skip {
+	if reason, skip := r.Skip(ctx, "a", "ma"); skip {
 		t.Fatalf("healthy provider skipped: %s", reason)
 	}
-	if reason, skip := r.Skip(ctx, "c"); !skip || reason != "no_api_key" {
+	if reason, skip := r.Skip(ctx, "c", "mc"); !skip || reason != "no_api_key" {
 		t.Errorf("keyless: %q %v", reason, skip)
 	}
-	if reason, skip := r.Skip(ctx, "ghost"); !skip || reason != "no_api_key" {
+	if reason, skip := r.Skip(ctx, "ghost", "m"); !skip || reason != "no_api_key" {
 		t.Errorf("unknown: %q %v", reason, skip)
 	}
 
 	r.StartCooldown("a")
-	if reason, skip := r.Skip(ctx, "a"); !skip || reason != "cooldown" {
+	if reason, skip := r.Skip(ctx, "a", "ma"); !skip || reason != "cooldown" {
 		t.Errorf("cooldown: %q %v", reason, skip)
 	}
 	*now = now.Add(29 * time.Second)
@@ -111,8 +111,31 @@ func TestSkipReasons(t *testing.T) {
 	}
 
 	_ = kv.Set(ctx, "exhausted:b", []byte("1"), time.Hour)
-	if reason, skip := r.Skip(ctx, "b"); !skip || reason != "exhausted" {
+	if reason, skip := r.Skip(ctx, "b", "mb"); !skip || reason != "exhausted" {
 		t.Errorf("exhausted: %q %v", reason, skip)
+	}
+}
+
+func TestExhaustedFlagScopes(t *testing.T) {
+	kv := cache.NewMem()
+	r, _ := newRouter(kv)
+	ctx := context.Background()
+
+	// A per-model flag blocks only that model of the provider.
+	_ = kv.Set(ctx, "exhausted:a/ma", []byte("1"), time.Hour)
+	if reason, skip := r.Skip(ctx, "a", "ma"); !skip || reason != "exhausted" {
+		t.Errorf("flagged model should be skipped: %q %v", reason, skip)
+	}
+	if reason, skip := r.Skip(ctx, "a", "other-model"); skip {
+		t.Errorf("another model of the same provider must stay routable (%s)", reason)
+	}
+
+	// A provider-wide flag blocks every model.
+	_ = kv.Set(ctx, "exhausted:b", []byte("1"), time.Hour)
+	for _, m := range []string{"mb", "anything"} {
+		if _, skip := r.Skip(ctx, "b", m); !skip {
+			t.Errorf("provider-wide flag must block model %q", m)
+		}
 	}
 }
 
@@ -120,7 +143,7 @@ func TestCacheOutageDoesNotBlockRouting(t *testing.T) {
 	kv := cache.NewMem()
 	kv.Err = errors.New("down")
 	r, _ := newRouter(kv)
-	if reason, skip := r.Skip(context.Background(), "a"); skip {
+	if reason, skip := r.Skip(context.Background(), "a", "ma"); skip {
 		t.Errorf("a cache outage must not make providers unroutable (%s)", reason)
 	}
 }

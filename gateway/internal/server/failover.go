@@ -28,7 +28,7 @@ func attempt[T any](s *Server, ctx context.Context, targets []config.Target,
 		if attempts >= s.MaxAttempts {
 			break
 		}
-		if reason, skip := s.Router.Skip(ctx, t.Provider); skip {
+		if reason, skip := s.Router.Skip(ctx, t.Provider, t.Model); skip {
 			s.Log.Debug("skipping provider", "provider", t.Provider, "reason", reason)
 			continue
 		}

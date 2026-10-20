@@ -75,5 +75,30 @@ services:
       # Topic must exist before events flow. The gateway itself starts fine without a broker.
       redpanda-init: {condition: service_completed_successfully}
 
+  # Two replicas of the same consumer group: Kafka splits the 6 partitions between them.
+  ledger:
+    build: {context: ../../ledger}
+    image: fl-ledger:dev
+    environment:
+      DATABASE_URL: postgres://freeloader:${POSTGRES_PASSWORD:-freeloader}@postgres:5432/freeloader?sslmode=disable
+      FL_KAFKA_BROKERS: redpanda:9092
+      FL_LEDGER_COMMIT_INTERVAL: ${FL_LEDGER_COMMIT_INTERVAL:-1s}
+    deploy: {replicas: 2}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redpanda-init: {condition: service_completed_successfully}
+
+  guard:
+    build: {context: ../../guard}
+    image: fl-guard:dev
+    environment:
+      FL_KAFKA_BROKERS: redpanda:9092
+      FL_CACHE_ADDR: fl-cache:6400
+      FL_CONFIG: /etc/freeloader/providers.yaml
+    volumes: ["../../config:/etc/freeloader:ro"]
+    depends_on:
+      redpanda-init: {condition: service_completed_successfully}
+      fl-cache: {condition: service_started}
+
 volumes:
   pgdata:

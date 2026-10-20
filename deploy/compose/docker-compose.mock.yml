@@ -13,3 +13,7 @@ services:
       MOCK_API_KEY: mock-key
     depends_on:
       mock-provider: {condition: service_started}
+
+  guard:
+    environment:
+      FL_CONFIG: /etc/freeloader/providers.mock.yaml

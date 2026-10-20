@@ -16,6 +16,10 @@ cache:
   addr: "localhost:6400"   # overridden by FL_CACHE_ADDR
   timeout: 100ms           # per cache operation; on timeout the gateway serves without the cache
 
+# fl-guard
+guard:
+  threshold: 0.9   # flag exhausted at 90% of a daily limit
+
 # Usage events (one per request) go to this topic. Normally set via FL_KAFKA_BROKERS;
 # leave brokers empty to run without an event stream.
 events:
@@ -26,9 +30,16 @@ providers:
   groq:
     base_url: https://api.groq.com/openai/v1
     api_key_env: GROQ_API_KEY
-    # Free-tier limits are consumed by fl-guard (level 6). They are deliberately not filled in:
-    # read them from https://console.groq.com/settings/limits and enter them here.
+    # fl-guard flags a provider/model as exhausted at `guard.threshold` of its DAILY limits.
+    # Groq limits are per model; these are what https://console.groq.com/settings/limits showed
+    # for this account on 2026-10-19. requests_per_minute is informational (the gateway reacts to
+    # real 429s with a cooldown instead).
+    reset:
+      timezone: UTC   # UNVERIFIED: Groq's docs do not say when daily limits reset
     limits: {}
+    models:
+      openai/gpt-oss-20b:  {requests_per_minute: 30, requests_per_day: 1000, tokens_per_day: 200000}
+      openai/gpt-oss-120b: {requests_per_minute: 30, requests_per_day: 1000, tokens_per_day: 200000}
   gemini:
     base_url: https://generativelanguage.googleapis.com/v1beta/openai
     api_key_env: GEMINI_API_KEY
@@ -36,13 +47,27 @@ providers:
     # gemini-3-flash-preview hung with no response; the 3.1-pro/pro-latest models returned 429 (no free quota);
     # 2.5 models are retired (404). A key from a project with billing enabled but no credit returns 402.
     # Per-model free limits are only shown in the AI Studio dashboard
-    # (https://aistudio.google.com/rate-limit). RPD resets at midnight Pacific.
+    # (https://aistudio.google.com/rate-limit); these are what it showed for this project on
+    # 2026-10-20. Models that are not listed here are not guarded (e.g. gemini-3.5-flash was
+    # not on the page). Limits are per project, so traffic that does not go through the gateway
+    # also spends them: the guard only sees what the gateway sends.
+    reset:
+      timezone: America/Los_Angeles   # "RPD quotas reset at midnight Pacific time" (ai.google.dev)
     limits: {}
+    models:
+      gemini-3.1-flash-lite: {requests_per_minute: 15, requests_per_day: 500}
+      gemini-3.5-flash-lite: {requests_per_minute: 15, requests_per_day: 500}
+      gemini-3.6-flash:      {requests_per_minute: 5,  requests_per_day: 20}
+      gemini-3.8-flash:      {requests_per_minute: 5,  requests_per_day: 20}
   openrouter:
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
     # From https://openrouter.ai/docs/api-reference/limits (':free' models):
     # 20 requests/min; 50 requests/day, or 1000/day once at least $10 of credits has been purchased.
+    # One quota shared by every ':free' model, so it is a provider-wide limit, not a per-model one.
+    # Failed requests count against it too; the guard only sees requests that were answered.
+    reset:
+      timezone: UTC   # UNVERIFIED: not stated for the free-model cap
     limits:
       requests_per_minute: 20
       requests_per_day: 50

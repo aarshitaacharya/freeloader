@@ -77,10 +77,14 @@ func (r *Router) prioritise(app *auth.App, ts []config.Target) []config.Target {
 	return out
 }
 
-// Skip reports whether a provider should not be tried right now, and why.
-// A cache error is treated as "not flagged": we'd rather try a provider than
-// refuse to serve because the cache is down.
-func (r *Router) Skip(ctx context.Context, name string) (string, bool) {
+// Skip reports whether a target should not be tried right now, and why.
+//
+// fl-guard sets two kinds of exhausted flag in fl-cache: exhausted:{provider} for
+// quotas shared by all of a provider's models (OpenRouter's free tier), and
+// exhausted:{provider}/{model} for per-model quotas (Groq, Gemini). Either one skips
+// the target. A cache error is treated as "not flagged": we'd rather try a provider
+// than refuse to serve because the cache is down.
+func (r *Router) Skip(ctx context.Context, name, model string) (string, bool) {
 	p := r.providers[name]
 	if p == nil || !p.Enabled() {
 		return "no_api_key", true
@@ -88,8 +92,10 @@ func (r *Router) Skip(ctx context.Context, name string) (string, bool) {
 	if r.CoolingDown(name) {
 		return "cooldown", true
 	}
-	if _, flagged, err := r.KV.Get(ctx, "exhausted:"+name); err == nil && flagged {
-		return "exhausted", true
+	for _, key := range []string{"exhausted:" + name, "exhausted:" + name + "/" + model} {
+		if _, flagged, err := r.KV.Get(ctx, key); err == nil && flagged {
+			return "exhausted", true
+		}
 	}
 	return "", false
 }

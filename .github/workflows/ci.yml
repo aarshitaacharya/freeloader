@@ -25,25 +25,30 @@ jobs:
       - run: cmake --build --preset ${{ matrix.preset }} -j"$(nproc)"
       - run: ctest --preset ${{ matrix.preset }}
 
-  gateway:
+  go:
+    name: ${{ matrix.module }} (vet, test -race, lint)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [gateway, ledger, guard]
     defaults:
       run:
-        working-directory: gateway
+        working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: gateway/go.mod
+          go-version-file: ${{ matrix.module }}/go.mod
       - run: go vet ./...
       - run: go test -race -count=1 ./...
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.15.0
-          working-directory: gateway
+          working-directory: ${{ matrix.module }}
 
   gateway-integration:
-    name: gateway integration (Postgres + fl-cache containers)
+    name: integration (Postgres, Redpanda, fl-cache containers)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,3 +58,7 @@ jobs:
       - run: docker build -t fl-cache:dev -f cache/Dockerfile .
       - run: go test -tags integration -race -count=1 -timeout 300s ./internal/integration/...
         working-directory: gateway
+      - run: go test -tags integration -race -count=1 -timeout 300s ./...
+        working-directory: ledger
+      - run: go test -tags integration -race -count=1 -timeout 300s ./...
+        working-directory: guard
