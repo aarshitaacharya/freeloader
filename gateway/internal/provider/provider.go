@@ -114,7 +114,7 @@ func (p *Provider) Chat(ctx context.Context, model string, req map[string]json.R
 		// point trying elsewhere.
 		return nil, &Error{Provider: p.Name, Failover: ctx.Err() == nil, Err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	limit := int64(maxResponseBytes)
 	if resp.StatusCode != http.StatusOK {

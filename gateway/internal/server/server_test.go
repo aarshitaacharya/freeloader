@@ -146,7 +146,7 @@ func (h *harness) do(method, path, body string, hdr map[string]string) result {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return result{resp.StatusCode, resp.Header, string(b)}
 }

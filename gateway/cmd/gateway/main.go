@@ -54,7 +54,7 @@ func run(log *slog.Logger) error {
 	defer pool.Close()
 
 	kv := cache.NewRedis(cfg.Cache.Addr, cfg.Cache.Timeout)
-	defer kv.Close()
+	defer func() { _ = kv.Close() }()
 
 	providers := map[string]*provider.Provider{}
 	for name, p := range cfg.Providers {

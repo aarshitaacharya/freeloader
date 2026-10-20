@@ -109,7 +109,7 @@ func TestTokenRejectionDoesNotConsumeRPM(t *testing.T) {
 	ctx := context.Background()
 	_ = l.AddTokens(ctx, app, 10)
 	for i := 0; i < 20; i++ {
-		l.Check(ctx, app)
+		_, _ = l.Check(ctx, app)
 	}
 	n, _ := cache.GetInt(ctx, kv, "rl:1:"+strconv.FormatInt(time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC).Unix()/60, 10))
 	if n != 0 {
