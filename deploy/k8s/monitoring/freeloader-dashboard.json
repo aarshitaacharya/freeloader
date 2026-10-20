@@ -697,7 +697,9 @@
       "stacking": {
        "mode": "none"
       }
-     }
+     },
+     "min": 0,
+     "max": 1
     },
     "overrides": []
    },
@@ -1125,7 +1127,7 @@
    },
    "gridPos": {
     "h": 8,
-    "w": 8,
+    "w": 7,
     "x": 8,
     "y": 53
    },
@@ -1166,7 +1168,7 @@
   {
    "id": 27,
    "type": "timeseries",
-   "title": "Keys / connections",
+   "title": "Keys",
    "description": "",
    "datasource": {
     "type": "prometheus",
@@ -1174,8 +1176,8 @@
    },
    "gridPos": {
     "h": 8,
-    "w": 4,
-    "x": 16,
+    "w": 3,
+    "x": 15,
     "y": 53
    },
    "targets": [
@@ -1187,15 +1189,6 @@
      "expr": "fl_cache_keys",
      "legendFormat": "keys",
      "refId": "A"
-    },
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "expr": "fl_cache_connections",
-     "legendFormat": "connections",
-     "refId": "B"
     }
    ],
    "fieldConfig": {
@@ -1224,6 +1217,55 @@
   {
    "id": 28,
    "type": "timeseries",
+   "title": "Connections",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 3,
+    "x": 18,
+    "y": 53
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "fl_cache_connections",
+     "legendFormat": "connections",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   }
+  },
+  {
+   "id": 29,
+   "type": "timeseries",
    "title": "Evictions + expired /s",
    "description": "",
    "datasource": {
@@ -1232,8 +1274,8 @@
    },
    "gridPos": {
     "h": 8,
-    "w": 4,
-    "x": 20,
+    "w": 3,
+    "x": 21,
     "y": 53
    },
    "targets": [

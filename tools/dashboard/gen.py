@@ -16,7 +16,7 @@ def row(title):
     y += 1
 
 
-def panel(title, exprs, x, w, unit="short", kind="timeseries", desc="", h=8, stack=False):
+def panel(title, exprs, x, w, unit="short", kind="timeseries", desc="", h=8, stack=False, vmax=None):
     """exprs: list of (promql, legend)."""
     global pid
     pid += 1
@@ -28,6 +28,8 @@ def panel(title, exprs, x, w, unit="short", kind="timeseries", desc="", h=8, sta
                          "stacking": {"mode": "normal" if stack else "none"}}}, "overrides": []},
          "options": {"legend": {"displayMode": "list", "placement": "bottom"},
                      "tooltip": {"mode": "multi"}}}
+    if vmax is not None:
+        p["fieldConfig"]["defaults"]["min"], p["fieldConfig"]["defaults"]["max"] = 0, vmax
     if kind == "stat":
         p["options"] = {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"}
     panels.append(p)
@@ -69,7 +71,7 @@ panel("Requests today by provider", [('max by (provider) (fl_guard_provider_requ
 panel("Requests today by model", [('max by (provider, model) (fl_guard_model_requests_today)', "{{provider}}/{{model}}")], 8, 8, "short")
 panel("Exhausted flags (1 = skipped by the router)", [
     ('max by (provider) (fl_guard_exhausted)', "{{provider}}"),
-    ('max by (provider, model) (fl_guard_model_exhausted)', "{{provider}}/{{model}}")], 16, 8, "short")
+    ('max by (provider, model) (fl_guard_model_exhausted)', "{{provider}}/{{model}}")], 16, 8, "short", vmax=1)
 done_row()
 
 row("Usage pipeline (events → ledger)")
@@ -93,9 +95,10 @@ done_row()
 
 row("fl-cache")
 panel("Commands/s by command", [('sum by (cmd) (rate(fl_cache_commands_total[1m]))', "{{cmd}}")], 0, 8, "ops", stack=True)
-panel("Command latency p99 (excludes network)", [('histogram_quantile(0.99, sum by (le) (rate(fl_cache_command_seconds_bucket[2m])))', "p99")], 8, 8, "s")
-panel("Keys / connections", [('fl_cache_keys', "keys"), ('fl_cache_connections', "connections")], 16, 4, "short")
-panel("Evictions + expired /s", [('rate(fl_cache_evictions_total[1m])', "evicted"), ('rate(fl_cache_expired_total[1m])', "expired")], 20, 4, "ops")
+panel("Command latency p99 (excludes network)", [('histogram_quantile(0.99, sum by (le) (rate(fl_cache_command_seconds_bucket[2m])))', "p99")], 8, 7, "s")
+panel("Keys", [('fl_cache_keys', "keys")], 15, 3, "short")
+panel("Connections", [('fl_cache_connections', "connections")], 18, 3, "short")
+panel("Evictions + expired /s", [('rate(fl_cache_evictions_total[1m])', "evicted"), ('rate(fl_cache_expired_total[1m])', "expired")], 21, 3, "ops")
 done_row()
 
 dash = {"uid": "freeloader", "title": "Freeloader", "tags": ["freeloader"], "timezone": "browser",
