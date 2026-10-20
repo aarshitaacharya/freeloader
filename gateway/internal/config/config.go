@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -13,6 +14,7 @@ import (
 type Config struct {
 	Server    Server              `yaml:"server"`
 	Cache     Cache               `yaml:"cache"`
+	Events    Events              `yaml:"events"`
 	Providers map[string]Provider `yaml:"providers"`
 	Aliases   map[string][]Target `yaml:"aliases"`
 }
@@ -22,6 +24,14 @@ type Server struct {
 	MaxAttempts    int           `yaml:"max_attempts"`
 	Cooldown       time.Duration `yaml:"cooldown"`
 	AttemptTimeout time.Duration `yaml:"attempt_timeout"`
+	// StreamIdleTimeout is the longest a stream may go silent before it is cut.
+	StreamIdleTimeout time.Duration `yaml:"stream_idle_timeout"`
+}
+
+// Events configures the usage-event producer. With no brokers, events are disabled.
+type Events struct {
+	Brokers []string `yaml:"brokers"` // overridden by FL_KAFKA_BROKERS (comma-separated)
+	Topic   string   `yaml:"topic"`
 }
 
 type Cache struct {
@@ -76,6 +86,20 @@ func Parse(raw []byte, getenv func(string) string) (*Config, error) {
 	}
 	if c.Server.AttemptTimeout <= 0 {
 		c.Server.AttemptTimeout = 30 * time.Second
+	}
+	if c.Server.StreamIdleTimeout <= 0 {
+		c.Server.StreamIdleTimeout = 60 * time.Second
+	}
+	if v := getenv("FL_KAFKA_BROKERS"); v != "" {
+		c.Events.Brokers = nil
+		for _, b := range strings.Split(v, ",") {
+			if b = strings.TrimSpace(b); b != "" {
+				c.Events.Brokers = append(c.Events.Brokers, b)
+			}
+		}
+	}
+	if c.Events.Topic == "" {
+		c.Events.Topic = "llm.usage"
 	}
 	if v := getenv("FL_CACHE_ADDR"); v != "" {
 		c.Cache.Addr = v

@@ -5,6 +5,9 @@ server:
   cooldown: 30s
   attempt_timeout: 2s
 
+events:
+  topic: llm.usage        # brokers come from FL_KAFKA_BROKERS
+
 cache:
   addr: "fl-cache:6400"
   timeout: 100ms
@@ -14,8 +17,12 @@ providers:
   limited: {base_url: "http://mock-provider:9000/limited/v1", api_key_env: MOCK_API_KEY}
   ok:      {base_url: "http://mock-provider:9000/ok/v1",      api_key_env: MOCK_API_KEY}
   slow:    {base_url: "http://mock-provider:9000/slow/v1",    api_key_env: MOCK_API_KEY}
+  nousage: {base_url: "http://mock-provider:9000/nousage/v1", api_key_env: MOCK_API_KEY}
+  cutoff:  {base_url: "http://mock-provider:9000/cutoff/v1",  api_key_env: MOCK_API_KEY}
 
 aliases:
   fast:     [{provider: ok, model: mock-model}]
   failover: [{provider: broken, model: m1}, {provider: limited, model: m2}, {provider: ok, model: m3}]
+  nousage:  [{provider: nousage, model: m1}]
+  cutoff:   [{provider: cutoff, model: m1}]
   slowfirst: [{provider: slow, model: m1}, {provider: ok, model: m2}]

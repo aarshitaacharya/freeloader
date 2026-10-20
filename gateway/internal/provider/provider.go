@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -134,4 +135,71 @@ func (p *Provider) Chat(ctx context.Context, model string, req map[string]json.R
 	}
 	_ = json.Unmarshal(b, &parsed) // a body we can't parse still goes back to the client
 	return &Response{Body: b, Usage: parsed.Usage}, nil
+}
+
+// Stream is a successfully opened streaming (SSE) response. Closing it cancels
+// the upstream request.
+type Stream struct {
+	Body   io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (s *Stream) Close() error {
+	s.cancel()
+	return s.Body.Close()
+}
+
+// ChatStream opens a streaming completion. Attempt timeout (p.Timeout) bounds only
+// the wait for the response *headers*: once the provider has started streaming,
+// a long generation is fine (the caller enforces a per-chunk idle timeout).
+// It asks the provider to send a final usage chunk (stream_options.include_usage).
+func (p *Provider) ChatStream(ctx context.Context, model string, req map[string]json.RawMessage) (*Stream, error) {
+	body := maps.Clone(req)
+	m, _ := json.Marshal(model)
+	body["model"] = m
+	body["stream"] = json.RawMessage("true")
+	opts := map[string]any{}
+	if raw, ok := body["stream_options"]; ok {
+		_ = json.Unmarshal(raw, &opts)
+	}
+	opts["include_usage"] = true
+	body["stream_options"], _ = json.Marshal(opts)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, &Error{Provider: p.Name, Err: err}
+	}
+
+	sctx, cancel := context.WithCancel(ctx)
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(p.Timeout, func() { timedOut.Store(true); cancel() })
+	fail := func(e *Error) (*Stream, error) { timer.Stop(); cancel(); return nil, e }
+
+	hreq, err := http.NewRequestWithContext(sctx, http.MethodPost, p.BaseURL+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return fail(&Error{Provider: p.Name, Err: err})
+	}
+	hreq.Header.Set("Content-Type", "application/json")
+	hreq.Header.Set("Accept", "text/event-stream")
+	hreq.Header.Set("Authorization", "Bearer "+p.APIKey)
+
+	resp, err := p.HTTP.Do(hreq)
+	if err != nil {
+		if timedOut.Load() {
+			err = fmt.Errorf("no response headers within %v: %w", p.Timeout, context.DeadlineExceeded)
+		}
+		return fail(&Error{Provider: p.Name, Failover: ctx.Err() == nil, Err: err})
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+		_ = resp.Body.Close()
+		return fail(&Error{Provider: p.Name, Status: resp.StatusCode, Body: b, Failover: failoverStatus(resp.StatusCode)})
+	}
+	if !timer.Stop() {
+		// Headers arrived at the same instant the timer fired: treat as a timeout.
+		_ = resp.Body.Close()
+		cancel()
+		return nil, &Error{Provider: p.Name, Failover: ctx.Err() == nil,
+			Err: fmt.Errorf("no response headers within %v: %w", p.Timeout, context.DeadlineExceeded)}
+	}
+	return &Stream{Body: resp.Body, cancel: cancel}, nil
 }

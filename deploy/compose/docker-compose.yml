@@ -23,6 +23,34 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
 
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.5
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container          # single broker for local dev
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+    ports: ["127.0.0.1:19092:19092"]   # for rpk and other tools on the host
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  redpanda-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.5
+    # Idempotent: only creates the topic if it is missing, so `up` can be re-run safely.
+    entrypoint: ["sh", "-c", "rpk -X brokers=redpanda:9092 topic describe llm.usage >/dev/null 2>&1 || rpk -X brokers=redpanda:9092 topic create llm.usage --partitions 6 --topic-config retention.ms=604800000"]
+    restart: "no"
+    depends_on:
+      redpanda: {condition: service_healthy}
+
   fl-cache:
     build: {context: ../.., dockerfile: cache/Dockerfile}
     image: fl-cache:dev
@@ -34,6 +62,7 @@ services:
     environment:
       DATABASE_URL: postgres://freeloader:${POSTGRES_PASSWORD:-freeloader}@postgres:5432/freeloader?sslmode=disable
       FL_CACHE_ADDR: fl-cache:6400
+      FL_KAFKA_BROKERS: redpanda:9092
       FL_CONFIG: /etc/freeloader/providers.yaml
     env_file:
       - path: ../../.env        # provider API keys; optional so `up` works before you have keys
@@ -43,6 +72,8 @@ services:
     depends_on:
       migrate: {condition: service_completed_successfully}
       fl-cache: {condition: service_started}
+      # Topic must exist before events flow. The gateway itself starts fine without a broker.
+      redpanda-init: {condition: service_completed_successfully}
 
 volumes:
   pgdata:

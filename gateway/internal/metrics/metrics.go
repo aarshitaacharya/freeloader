@@ -16,6 +16,13 @@ type Metrics struct {
 	CacheErrors    prometheus.Counter     // cache unreachable; requests were served without it
 }
 
+// RegisterEventsBuffered exposes how many usage events are waiting to be delivered.
+func (m *Metrics) RegisterEventsBuffered(buffered func() int) {
+	m.Reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "fl_gateway_events_buffered", Help: "Usage events accepted but not yet delivered to the event stream; grows during a broker outage."},
+		func() float64 { return float64(buffered()) }))
+}
+
 func New() *Metrics {
 	m := &Metrics{
 		Reg: prometheus.NewRegistry(),

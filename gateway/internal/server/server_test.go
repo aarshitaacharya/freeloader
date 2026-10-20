@@ -17,6 +17,7 @@ import (
 	"github.com/aarshitaacharya/freeloader/gateway/internal/auth"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/cache"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/config"
+	"github.com/aarshitaacharya/freeloader/gateway/internal/events"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/metrics"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/provider"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/ratelimit"
@@ -84,6 +85,7 @@ func (u *upstream) set(h func(http.ResponseWriter, *http.Request)) {
 }
 
 type harness struct {
+	events *events.Memory
 	t      *testing.T
 	srv    *httptest.Server
 	kv     *cache.Mem
@@ -97,7 +99,13 @@ const testKey = "fl_testkey"
 
 func newHarness(t *testing.T, app auth.App, maxAttempts int) *harness {
 	t.Helper()
-	h := &harness{t: t, kv: cache.NewMem(), m: metrics.New(), ups: map[string]*upstream{}}
+	return newHarnessWith(t, app, maxAttempts, nil)
+}
+
+// newHarnessWith lets a test adjust the server's dependencies before it starts.
+func newHarnessWith(t *testing.T, app auth.App, maxAttempts int, tweak func(*Deps)) *harness {
+	t.Helper()
+	h := &harness{t: t, kv: cache.NewMem(), m: metrics.New(), ups: map[string]*upstream{}, events: &events.Memory{}}
 	provs := map[string]*provider.Provider{}
 	for _, name := range []string{"a", "b", "c"} {
 		h.ups[name] = newUpstream(t, replyOK)
@@ -114,11 +122,15 @@ func newHarness(t *testing.T, app auth.App, maxAttempts int) *harness {
 	}
 	h.store = &fakeStore{apps: map[string]*auth.App{testKey: &app}}
 	h.router = route.New(aliases, provs, h.kv, 30*time.Second)
-	s := New(Deps{
+	deps := Deps{
 		Auth: auth.New(h.store, 30*time.Second), Limiter: ratelimit.New(h.kv), KV: h.kv,
 		Router: h.router, Metrics: h.m, MaxAttempts: maxAttempts,
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Events: h.events,
+	}
+	if tweak != nil {
+		tweak(&deps)
+	}
+	s := New(deps)
 	h.srv = httptest.NewServer(s.Handler())
 	t.Cleanup(h.srv.Close)
 	return h
@@ -519,7 +531,6 @@ func TestRequestValidation(t *testing.T) {
 		{"empty model", `{"model":"","messages":[{"role":"user","content":"x"}]}`, 400, "missing_model"},
 		{"missing messages", `{"model":"fast"}`, 400, "missing_messages"},
 		{"unknown model", `{"model":"nope","messages":[{"role":"user","content":"x"}]}`, 404, "model_not_found"},
-		{"streaming not yet supported", `{"model":"fast","stream":true,"messages":[{"role":"user","content":"x"}]}`, 501, "streaming_unsupported"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

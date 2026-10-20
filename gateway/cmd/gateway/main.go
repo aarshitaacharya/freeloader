@@ -15,6 +15,7 @@ import (
 	"github.com/aarshitaacharya/freeloader/gateway/internal/auth"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/cache"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/config"
+	"github.com/aarshitaacharya/freeloader/gateway/internal/events"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/metrics"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/provider"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/ratelimit"
@@ -64,14 +65,36 @@ func run(log *slog.Logger) error {
 		}
 	}
 
+	m := metrics.New()
+	var publisher events.Publisher = events.Noop{}
+	if len(cfg.Events.Brokers) > 0 {
+		kafka, err := events.NewKafka(cfg.Events.Brokers, cfg.Events.Topic, m.EventsDropped, log)
+		if err != nil {
+			return err
+		}
+		publisher = kafka
+		m.RegisterEventsBuffered(kafka.Buffered)
+		defer func() { // flush what is buffered, but never hold shutdown hostage to a dead broker
+			flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			kafka.Close(flushCtx)
+		}()
+		log.Info("usage events enabled", "brokers", cfg.Events.Brokers, "topic", cfg.Events.Topic)
+	} else {
+		log.Warn("usage events disabled: set FL_KAFKA_BROKERS or events.brokers")
+	}
+
 	srv := server.New(server.Deps{
 		Auth:        auth.New(auth.PGStore{Pool: pool}, 30*time.Second),
 		Limiter:     ratelimit.New(kv),
 		KV:          kv,
 		Router:      route.New(cfg.Aliases, providers, kv, cfg.Server.Cooldown),
-		Metrics:     metrics.New(),
+		Metrics:     m,
 		Log:         log,
 		MaxAttempts: cfg.Server.MaxAttempts,
+
+		Events:            publisher,
+		StreamIdleTimeout: cfg.Server.StreamIdleTimeout,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Server.Listen,

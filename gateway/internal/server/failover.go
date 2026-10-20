@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -18,15 +17,13 @@ type failure struct {
 	canceled    bool // the client went away
 }
 
-// callWithFailover tries targets in order, at most MaxAttempts real calls.
-// Providers that are cooling down, flagged exhausted, or have no key are skipped
-// without costing an attempt.
-func (s *Server) callWithFailover(ctx context.Context, targets []config.Target, req map[string]json.RawMessage) (*provider.Response, string, int, failure) {
-	var (
-		f        failure
-		attempts int
-		prev     string
-	)
+// attempt tries targets in order, at most MaxAttempts real calls, using call for
+// each. It serves both buffered and streaming requests. Providers that are
+// cooling down, flagged exhausted, or have no key are skipped without costing an
+// attempt.
+func attempt[T any](s *Server, ctx context.Context, targets []config.Target,
+	call func(p *provider.Provider, model string) (T, error)) (res T, used config.Target, attempts int, f failure) {
+	var prev string
 	for _, t := range targets {
 		if attempts >= s.MaxAttempts {
 			break
@@ -40,13 +37,13 @@ func (s *Server) callWithFailover(ctx context.Context, targets []config.Target, 
 		}
 		attempts++
 
-		resp, err := s.Router.Provider(t.Provider).Chat(ctx, t.Model, req)
+		out, err := call(s.Router.Provider(t.Provider), t.Model)
 		if err == nil {
-			return resp, t.Provider, attempts, f
+			return out, t, attempts, f
 		}
 		if ctx.Err() != nil {
 			f.canceled = true
-			return nil, "", attempts, f
+			return res, used, attempts, f
 		}
 		var perr *provider.Error
 		if !errors.As(err, &perr) {
@@ -58,14 +55,14 @@ func (s *Server) callWithFailover(ctx context.Context, targets []config.Target, 
 		f.last = perr
 		if !perr.Failover {
 			f.passthrough = true
-			return nil, "", attempts, f
+			return res, used, attempts, f
 		}
 		if cooldownWorthy(perr) {
 			s.Router.StartCooldown(t.Provider)
 		}
 		prev = t.Provider
 	}
-	return nil, "", attempts, f
+	return res, used, attempts, f
 }
 
 // cooldownWorthy: failures where trying the same provider again straight away is

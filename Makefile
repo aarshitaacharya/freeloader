@@ -45,7 +45,7 @@ bench-report: cache-image
 COMPOSE := docker compose $(if $(wildcard .env),--env-file .env) -f deploy/compose/docker-compose.yml
 COMPOSE_MOCK := $(COMPOSE) -f deploy/compose/docker-compose.mock.yml
 
-.PHONY: init up up-mock down logs app gateway-test gateway-integration check-hit-latency
+.PHONY: init up up-mock down logs app gateway-test gateway-integration check-hit-latency check-openai-client
 
 init:  ## create local config and .env from the examples (never overwrites)
 	@[ -f config/providers.yaml ] || cp config/providers.example.yaml config/providers.yaml
@@ -85,3 +85,11 @@ check-hit-latency:
 	@[ -n "$(KEY)" ] || { echo "usage: make check-hit-latency KEY=fl_..."; exit 2; }
 	docker run --rm --network freeloader_default -e KEY=$(KEY) -v $(CURDIR)/bench:/bench:ro \
 	  python:3.13-alpine python -I /bench/hit_latency.py
+
+# Level 5 check: a streamed chat through the gateway using the official OpenAI Python client.
+#   make check-openai-client KEY=fl_... [MODEL=fast]
+check-openai-client:
+	@[ -n "$(KEY)" ] || { echo "usage: make check-openai-client KEY=fl_... [MODEL=fast]"; exit 2; }
+	docker run --rm --network freeloader_default -e KEY=$(KEY) -e MODEL=$(or $(MODEL),fast) \
+	  -v $(CURDIR)/tools/checks:/checks:ro python:3.13-slim \
+	  sh -c "pip install -q --disable-pip-version-check openai >/dev/null 2>&1 && python -I /checks/openai_client_check.py"

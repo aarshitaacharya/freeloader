@@ -9,11 +9,18 @@ server:
   listen: ":8080"
   max_attempts: 3          # providers tried per request
   cooldown: 30s            # skip a provider for this long after it returns 429
-  attempt_timeout: 30s     # per upstream call
+  attempt_timeout: 30s     # per upstream call; for streams, the wait for the first response headers
+  stream_idle_timeout: 60s # a stream silent for this long is cut
 
 cache:
   addr: "localhost:6400"   # overridden by FL_CACHE_ADDR
   timeout: 100ms           # per cache operation; on timeout the gateway serves without the cache
+
+# Usage events (one per request) go to this topic. Normally set via FL_KAFKA_BROKERS;
+# leave brokers empty to run without an event stream.
+events:
+  brokers: []
+  topic: llm.usage
 
 providers:
   groq:

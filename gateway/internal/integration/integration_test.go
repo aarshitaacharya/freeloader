@@ -26,6 +26,7 @@ import (
 	"github.com/aarshitaacharya/freeloader/gateway/internal/auth"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/cache"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/config"
+	"github.com/aarshitaacharya/freeloader/gateway/internal/events"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/metrics"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/provider"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/ratelimit"
@@ -38,7 +39,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/modules/redpanda"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 type stack struct {
@@ -145,16 +149,26 @@ func (s *stack) addApp(t *testing.T, key, name string, rpm int, tokens int64, di
 
 // replica builds one gateway instance. All replicas share the same Postgres and fl-cache.
 func (s *stack) replica(t *testing.T) (*httptest.Server, *metrics.Metrics) {
+	return s.replicaWithEvents(t, nil)
+}
+
+// replicaWithEvents builds a replica whose usage events go to the publisher that
+// newPub returns (it receives the replica's metrics, so drops are counted there).
+func (s *stack) replicaWithEvents(t *testing.T, newPub func(*metrics.Metrics) events.Publisher) (*httptest.Server, *metrics.Metrics) {
 	provs := map[string]*provider.Provider{
 		"a": provider.New("a", s.upA.srv.URL, "ka", 2*time.Second),
 		"b": provider.New("b", s.upB.srv.URL, "kb", 2*time.Second),
 	}
 	aliases := map[string][]config.Target{"fast": {{Provider: "a", Model: "ma"}, {Provider: "b", Model: "mb"}}}
 	m := metrics.New()
+	var pub events.Publisher
+	if newPub != nil {
+		pub = newPub(m)
+	}
 	srv := server.New(server.Deps{
 		Auth: auth.New(auth.PGStore{Pool: s.pool}, 30*time.Second), Limiter: ratelimit.New(s.kv), KV: s.kv,
 		Router: route.New(aliases, provs, s.kv, 30*time.Second), Metrics: m, MaxAttempts: 3,
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Events: pub,
 	})
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
@@ -367,4 +381,175 @@ func TestGatewayAgainstRealPostgresAndFlCache(t *testing.T) {
 			t.Errorf("counters should have reset with the cache; token counter = %d", n)
 		}
 	})
+}
+
+// ---- Redpanda --------------------------------------------------------------
+
+func startRedpanda(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	c, err := redpanda.Run(ctx, "docker.redpanda.com/redpandadata/redpanda:v26.2.5")
+	if err != nil {
+		t.Fatalf("redpanda: %v", err)
+	}
+	t.Cleanup(func() { _ = testcontainers.TerminateContainer(c) })
+	broker, err := c.KafkaSeedBroker(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return broker
+}
+
+func createUsageTopic(t *testing.T, broker string) {
+	t.Helper()
+	cl, err := kgo.NewClient(kgo.SeedBrokers(broker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	retention := "604800000" // 7 days
+	if _, err := kadm.NewClient(cl).CreateTopic(context.Background(), 6, 1, map[string]*string{"retention.ms": &retention}, "llm.usage"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func consumeAll(t *testing.T, broker string, want int) []*kgo.Record {
+	t.Helper()
+	cl, err := kgo.NewClient(kgo.SeedBrokers(broker), kgo.ConsumeTopics("llm.usage"),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	var out []*kgo.Record
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	for len(out) < want {
+		fetches := cl.PollFetches(ctx)
+		if ctx.Err() != nil {
+			break
+		}
+		fetches.EachRecord(func(r *kgo.Record) { out = append(out, r) })
+	}
+	return out
+}
+
+func TestUsageEventsReachRedpandaOncePerRequest(t *testing.T) {
+	s := setup(t)
+	broker := startRedpanda(t)
+	createUsageTopic(t, broker)
+
+	var kafka *events.Kafka
+	gw, _ := s.replicaWithEvents(t, func(m *metrics.Metrics) events.Publisher {
+		k, err := events.NewKafka([]string{broker}, "llm.usage", m.EventsDropped, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		kafka = k
+		return k
+	})
+	idA := s.addApp(t, "fl_evA", "evA", 1000, 1_000_000, false)
+	idB := s.addApp(t, "fl_evB", "evB", 1000, 1_000_000, false)
+
+	const perApp = 15
+	for i := 0; i < perApp; i++ {
+		post(t, gw.URL, "fl_evA", fmt.Sprintf(`{"model":"fast","messages":[{"role":"user","content":"a%d"}]}`, i))
+		post(t, gw.URL, "fl_evB", fmt.Sprintf(`{"model":"fast","messages":[{"role":"user","content":"b%d"}]}`, i))
+	}
+	post(t, gw.URL, "fl_evA", det)
+	post(t, gw.URL, "fl_evA", det) // a cache hit: still one event
+	total := 2*perApp + 2
+
+	flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	kafka.Close(flushCtx)
+
+	recs := consumeAll(t, broker, total)
+	if len(recs) != total {
+		t.Fatalf("consumed %d events, want exactly %d (one per request)", len(recs), total)
+	}
+	seen := map[string]bool{}
+	partitionOf := map[int64]int32{}
+	var cacheHits int
+	lastTS := map[int64]time.Time{}
+	for _, r := range recs {
+		var e events.Event
+		if err := json.Unmarshal(r.Value, &e); err != nil {
+			t.Fatalf("bad event JSON %q: %v", r.Value, err)
+		}
+		if seen[e.RequestID] {
+			t.Errorf("duplicate request_id %s", e.RequestID)
+		}
+		seen[e.RequestID] = true
+		if string(r.Key) != strconv.FormatInt(e.AppID, 10) {
+			t.Errorf("record key %q != app_id %d", r.Key, e.AppID)
+		}
+		if p, ok := partitionOf[e.AppID]; ok && p != r.Partition {
+			t.Errorf("app %d spread over partitions %d and %d: ordering per app is lost", e.AppID, p, r.Partition)
+		}
+		partitionOf[e.AppID] = r.Partition
+		if e.TS.Before(lastTS[e.AppID]) {
+			t.Errorf("app %d events out of order", e.AppID)
+		}
+		lastTS[e.AppID] = e.TS
+		if e.CacheHit {
+			cacheHits++
+		}
+		if e.Status != 200 || e.Alias != "fast" {
+			t.Errorf("unexpected event %+v", e)
+		}
+	}
+	if cacheHits != 1 || partitionOf[idA] == 0 && partitionOf[idB] == 0 && len(partitionOf) != 2 {
+		t.Errorf("cacheHits=%d partitions=%v", cacheHits, partitionOf)
+	}
+
+	cl, _ := kgo.NewClient(kgo.SeedBrokers(broker))
+	defer cl.Close()
+	details, err := kadm.NewClient(cl).ListTopics(context.Background(), "llm.usage")
+	if err != nil || len(details["llm.usage"].Partitions) != 6 {
+		t.Errorf("topic partitions = %v (err %v), want 6", len(details["llm.usage"].Partitions), err)
+	}
+}
+
+func TestBrokerDownDoesNotAffectServing(t *testing.T) {
+	s := setup(t)
+	var m *metrics.Metrics
+	gw, mm := s.replicaWithEvents(t, func(mx *metrics.Metrics) events.Publisher {
+		m = mx
+		// Nothing listens on port 1. Short delivery timeout and a tiny buffer so the
+		// test sees both drop paths quickly.
+		k, err := events.NewKafka([]string{"127.0.0.1:1"}, "llm.usage", mx.EventsDropped,
+			slog.New(slog.NewTextHandler(io.Discard, nil)),
+			kgo.RecordDeliveryTimeout(1100*time.Millisecond), kgo.MaxBufferedRecords(5))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	})
+	_ = mm
+	s.addApp(t, "fl_nobroker", "nobroker", 100000, 100_000_000, false)
+
+	const n = 40
+	var slowest time.Duration
+	for i := 0; i < n; i++ {
+		start := time.Now()
+		r := post(t, gw.URL, "fl_nobroker", fmt.Sprintf(`{"model":"fast","messages":[{"role":"user","content":"x%d"}]}`, i))
+		if r.status != 200 {
+			t.Fatalf("request %d failed with %d while the event broker is down", i, r.status)
+		}
+		if d := time.Since(start); d > slowest {
+			slowest = d
+		}
+	}
+	if slowest > time.Second {
+		t.Errorf("slowest request %v: a dead broker must not slow requests down", slowest)
+	}
+	// Everything is eventually counted as dropped: overflow immediately, the rest after the delivery timeout.
+	deadline := time.Now().Add(10 * time.Second)
+	for testutil.ToFloat64(m.EventsDropped) < n && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := testutil.ToFloat64(m.EventsDropped); got != n {
+		t.Errorf("fl_gateway_events_dropped_total = %v, want %d", got, n)
+	}
 }

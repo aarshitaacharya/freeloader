@@ -15,9 +15,12 @@ import (
 	"github.com/aarshitaacharya/freeloader/gateway/internal/auth"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/cache"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/config"
+	"github.com/aarshitaacharya/freeloader/gateway/internal/events"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/metrics"
+	"github.com/aarshitaacharya/freeloader/gateway/internal/provider"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/ratelimit"
 	"github.com/aarshitaacharya/freeloader/gateway/internal/route"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -32,6 +35,9 @@ type Deps struct {
 	Log         *slog.Logger
 	MaxAttempts int
 	Now         func() time.Time
+
+	Events            events.Publisher // nil = events disabled
+	StreamIdleTimeout time.Duration    // max silence between chunks of a stream; default 60 s
 }
 
 type Server struct {
@@ -49,6 +55,12 @@ func New(d Deps) *Server {
 	if d.MaxAttempts <= 0 {
 		d.MaxAttempts = 3
 	}
+	if d.Events == nil {
+		d.Events = events.Noop{}
+	}
+	if d.StreamIdleTimeout <= 0 {
+		d.StreamIdleTimeout = 60 * time.Second
+	}
 	s := &Server{Deps: d, mux: http.NewServeMux()}
 	s.mux.HandleFunc("POST /v1/chat/completions", s.handleChat)
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
@@ -63,6 +75,7 @@ func (s *Server) Handler() http.Handler { return s.mux }
 // cachedResponse is what we store in fl-cache for a completed request.
 type cachedResponse struct {
 	Provider string          `json:"provider"`
+	Model    string          `json:"model,omitempty"`
 	Body     json.RawMessage `json:"body"`
 }
 
@@ -156,22 +169,42 @@ func isZeroTemperature(req map[string]json.RawMessage) bool {
 	return json.Unmarshal(raw, &t) == nil && t == 0
 }
 
+// reqState is what the deferred bookkeeping in handleChat needs to know.
+type reqState struct {
+	appName, alias, answeredBy string
+	// ev is non-nil once the request is attributable to an app and well-formed.
+	// Every such request, whatever its outcome, emits exactly one event.
+	ev             *events.Event
+	statusOverride int // set when the real outcome differs from what the client saw (aborted streams)
+}
+
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	start := s.Now()
+	id := uuid.Must(uuid.NewV7()).String()
+	w.Header().Set("X-Request-Id", id)
 	sw := &statusWriter{ResponseWriter: w}
 	w = sw
-	appName, alias, answeredBy := "unknown", "none", ""
-	defer func() {
+	st := &reqState{appName: "unknown", alias: "none"}
+	defer func() { // runs on every exit path, including an aborted stream
 		status := sw.status
 		if status == 0 {
 			status = http.StatusOK
 		}
-		s.Metrics.Requests.WithLabelValues(appName, alias, strconv.Itoa(status)).Inc()
-		if answeredBy != "" {
-			s.Metrics.Latency.WithLabelValues(answeredBy).Observe(s.Now().Sub(start).Seconds())
+		if st.statusOverride != 0 {
+			status = st.statusOverride
 		}
-		s.Log.Info("request", "app", appName, "alias", alias, "provider", answeredBy,
-			"status", status, "ms", s.Now().Sub(start).Milliseconds())
+		elapsed := s.Now().Sub(start)
+		s.Metrics.Requests.WithLabelValues(st.appName, st.alias, strconv.Itoa(status)).Inc()
+		if st.answeredBy != "" {
+			s.Metrics.Latency.WithLabelValues(st.answeredBy).Observe(elapsed.Seconds())
+		}
+		s.Log.Info("request", "request_id", id, "app", st.appName, "alias", st.alias, "provider", st.answeredBy,
+			"status", status, "ms", elapsed.Milliseconds())
+		if st.ev != nil {
+			st.ev.Status = status
+			st.ev.LatencyMS = elapsed.Milliseconds()
+			s.Events.Publish(*st.ev)
+		}
 	}()
 	ctx := r.Context()
 
@@ -181,7 +214,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.authError(w, err)
 		return
 	}
-	appName = app.Name
+	st.appName = app.Name
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 	var req map[string]json.RawMessage
@@ -198,22 +231,20 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "missing_messages", "\"messages\" is required", 0)
 		return
 	}
+	stream := false
 	if raw, ok := req["stream"]; ok {
-		var stream bool
-		if json.Unmarshal(raw, &stream) == nil && stream {
-			writeError(w, http.StatusNotImplemented, "invalid_request_error", "streaming_unsupported", "streaming is not implemented yet", 0)
-			return
-		}
+		_ = json.Unmarshal(raw, &stream)
 	}
 
 	var targets []config.Target
-	alias, targets, err = s.Router.Resolve(app, model)
+	st.alias, targets, err = s.Router.Resolve(app, model)
 	if err != nil {
-		alias = "none"
+		st.alias = "none"
 		writeError(w, http.StatusNotFound, "invalid_request_error", "model_not_found",
 			"unknown model \""+model+"\"; see GET /v1/models", 0)
 		return
 	}
+	st.ev = &events.Event{RequestID: id, TS: start.UTC(), AppID: app.ID, Alias: st.alias}
 
 	// 2. Rate limit (fails open if the cache is down)
 	dec, err := s.Limiter.Check(ctx, app)
@@ -223,6 +254,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.Metrics.RateLimited.WithLabelValues(app.Name).Inc()
 		writeError(w, http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded",
 			"app limit exceeded: "+string(dec.Reason), dec.RetryAfter)
+		return
+	}
+
+	// Streams are proxied straight through and never cached.
+	if stream {
+		s.serveStream(w, r, app, targets, req, st)
 		return
 	}
 
@@ -242,7 +279,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			var c cachedResponse
 			if json.Unmarshal(b, &c) == nil {
 				s.Metrics.CacheHits.Inc()
-				answeredBy = "cache"
+				st.answeredBy = "cache"
+				st.ev.CacheHit, st.ev.Provider, st.ev.Model = true, c.Provider, c.Model
 				w.Header().Set("X-Freeloader-Cache", "HIT")
 				w.Header().Set("X-Freeloader-Provider", c.Provider)
 				w.Header().Set("Content-Type", "application/json")
@@ -254,16 +292,25 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4+5. Route, call, fail over
-	resp, used, attempts, failure := s.callWithFailover(ctx, targets, req)
+	resp, used, attempts, failure := attempt(s, ctx, targets, func(p *provider.Provider, m string) (*provider.Response, error) {
+		return p.Chat(ctx, m, req)
+	})
+	st.ev.Attempts = attempts
 	if resp == nil {
 		s.writeFailure(w, targets, attempts, failure)
 		return
 	}
-	answeredBy = used
+	st.answeredBy = used.Provider
+	st.ev.Provider, st.ev.Model = used.Provider, used.Model
+	st.ev.PromptTokens = resp.Usage.PromptTokens
+	st.ev.CompletionTokens = resp.Usage.CompletionTokens
+	if st.ev.CompletionTokens == 0 && resp.Usage.TotalTokens > resp.Usage.PromptTokens {
+		st.ev.CompletionTokens = resp.Usage.TotalTokens - resp.Usage.PromptTokens
+	}
 
 	// 6. Record, before responding so a follow-up request always sees the cache entry.
 	if cacheable {
-		env, _ := json.Marshal(cachedResponse{Provider: used, Body: resp.Body})
+		env, _ := json.Marshal(cachedResponse{Provider: used.Provider, Model: used.Model, Body: resp.Body})
 		if err := s.KV.Set(ctx, key, env, app.CacheTTL); err != nil {
 			s.cacheFailed("set", err)
 		}
@@ -272,7 +319,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.cacheFailed("add_tokens", err)
 	}
 
-	w.Header().Set("X-Freeloader-Provider", used)
+	w.Header().Set("X-Freeloader-Provider", used.Provider)
 	w.Header().Set("X-Freeloader-Attempts", strconv.Itoa(attempts))
 	if cacheable {
 		w.Header().Set("X-Freeloader-Cache", "MISS")
