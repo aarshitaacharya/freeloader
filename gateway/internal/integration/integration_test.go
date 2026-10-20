@@ -76,7 +76,7 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port
 }
 
@@ -176,7 +176,7 @@ func post(t *testing.T, base, key, body string) resp {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	b, _ := io.ReadAll(r.Body)
 	return resp{r.StatusCode, r.Header, string(b)}
 }

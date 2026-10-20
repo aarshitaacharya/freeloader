@@ -91,7 +91,6 @@ type harness struct {
 	router *route.Router
 	ups    map[string]*upstream
 	store  *fakeStore
-	maxAtt int
 }
 
 const testKey = "fl_testkey"
