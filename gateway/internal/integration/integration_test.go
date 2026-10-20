@@ -187,7 +187,7 @@ const nondet = `{"model":"fast","messages":[{"role":"user","content":"integratio
 func TestGatewayAgainstRealPostgresAndFlCache(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
-	gw, m := s.replica(t)
+	gw, _ := s.replica(t)
 
 	t.Run("auth against real Postgres", func(t *testing.T) {
 		s.addApp(t, "fl_authdemo", "authdemo", 1000, 1_000_000, false)
@@ -249,6 +249,7 @@ func TestGatewayAgainstRealPostgresAndFlCache(t *testing.T) {
 
 	t.Run("failover when a provider key is broken", func(t *testing.T) {
 		s.addApp(t, "fl_failover", "failover", 1000, 1_000_000, false)
+		gw, m := s.replica(t) // own replica: the cooldown this test triggers must not leak into others
 		s.upA.mode.Store(func(w http.ResponseWriter) { w.WriteHeader(401); _, _ = io.WriteString(w, `{"error":"bad key"}`) })
 		defer s.upA.mode.Store(func(w http.ResponseWriter) {
 			_, _ = io.WriteString(w, `{"usage":{"total_tokens":15}}`)
@@ -264,6 +265,7 @@ func TestGatewayAgainstRealPostgresAndFlCache(t *testing.T) {
 
 	t.Run("an exhausted flag in fl-cache routes every replica around a provider", func(t *testing.T) {
 		s.addApp(t, "fl_flag", "flagapp", 1000, 1_000_000, false)
+		gw, _ := s.replica(t)
 		gw2, _ := s.replica(t)
 		if err := s.kv.Set(ctx, "exhausted:b", []byte("1"), time.Minute); err != nil {
 			t.Fatal(err)
@@ -318,6 +320,7 @@ func TestGatewayAgainstRealPostgresAndFlCache(t *testing.T) {
 	// Runs last: it stops and restarts fl-cache.
 	t.Run("fl-cache outage and restart", func(t *testing.T) {
 		id := s.addApp(t, "fl_outage", "outage", 1000, 1_000_000, false)
+		gw, m := s.replica(t)
 		post(t, gw.URL, "fl_outage", det) // populate cache
 		if r := post(t, gw.URL, "fl_outage", det); r.h.Get("X-Freeloader-Cache") != "HIT" {
 			t.Fatal("precondition: expected a HIT before the outage")
