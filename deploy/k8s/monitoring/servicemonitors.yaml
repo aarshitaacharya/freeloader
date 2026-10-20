@@ -1,0 +1,33 @@
+# One ServiceMonitor per component. Prometheus discovers them cluster-wide
+# (serviceMonitorSelectorNilUsesHelmValues=false in values.yaml).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: gateway, namespace: freeloader}
+spec:
+  selector: {matchLabels: {app: gateway}}
+  endpoints: [{port: http, path: /metrics, interval: 10s}]
+  jobLabel: app
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: ledger, namespace: freeloader}
+spec:
+  selector: {matchLabels: {app: ledger}}
+  endpoints: [{port: metrics, path: /metrics, interval: 10s}]
+  jobLabel: app
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: guard, namespace: freeloader}
+spec:
+  selector: {matchLabels: {app: guard}}
+  endpoints: [{port: metrics, path: /metrics, interval: 10s}]
+  jobLabel: app
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: fl-cache, namespace: freeloader}
+spec:
+  selector: {matchLabels: {app: fl-cache}}
+  endpoints: [{port: metrics, path: /metrics, interval: 10s}]
+  jobLabel: app

@@ -133,3 +133,17 @@ kind-app:
 # Level 7 check: delete a gateway pod in the middle of a 60 s load test (needs `make kind-up-mock`).
 kind-drill:
 	deploy/kind/drill.sh
+
+# ---- Level 8: observability (after kind-up) ----
+.PHONY: kind-monitoring kind-grafana dashboard
+kind-monitoring: kind-tools
+	OVERLAY=$${OVERLAY:-mock} deploy/kind/monitoring.sh
+
+# Port-forwards Grafana (3000) and Prometheus (9090) and prints the admin password.
+kind-grafana:
+	@echo "Grafana http://127.0.0.1:3000  user admin  password $$(kubectl --context kind-freeloader -n monitoring get secret grafana-admin -o jsonpath='{.data.password}' | base64 -d)"
+	@kubectl --context kind-freeloader -n monitoring port-forward svc/kps-prometheus 9090:9090 >/dev/null & \
+	  kubectl --context kind-freeloader -n monitoring port-forward svc/kps-grafana 3000:80
+
+dashboard:
+	python3 tools/dashboard/gen.py

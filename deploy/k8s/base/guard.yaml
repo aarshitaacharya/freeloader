@@ -1,3 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata: {name: guard, labels: {tier: app, app: guard}}
+spec:
+  selector: {app: guard}
+  ports: [{name: metrics, port: 9102}]
+---
 # One replica: it evaluates every provider's counters, so a second would only duplicate work.
 apiVersion: apps/v1
 kind: Deployment

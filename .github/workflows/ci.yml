@@ -76,4 +76,13 @@ jobs:
           for o in dev mock; do
             kubectl kustomize deploy/k8s/overlays/$o | ./kubeconform -strict -summary -kubernetes-version 1.33.0 -
           done
-      - run: bash -n deploy/kind/up.sh deploy/kind/down.sh deploy/kind/drill.sh
+      - name: validate monitoring manifests (ServiceMonitor, PrometheusRule)
+        run: |
+          kubectl kustomize deploy/k8s/monitoring | ./kubeconform -strict -summary -kubernetes-version 1.33.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -
+      - name: dashboard JSON is generated from tools/dashboard/gen.py
+        run: |
+          python3 tools/dashboard/gen.py
+          git diff --exit-code deploy/k8s/monitoring/freeloader-dashboard.json
+      - run: for f in deploy/kind/*.sh; do bash -n "$f"; done

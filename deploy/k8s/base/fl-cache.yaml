@@ -2,7 +2,7 @@
 # (docs/decisions/0003). Losing the pod resets counters; the gateway fails open meanwhile.
 apiVersion: v1
 kind: Service
-metadata: {name: fl-cache}
+metadata: {name: fl-cache, labels: {app: fl-cache}}
 spec:
   selector: {app: fl-cache}
   ports:
