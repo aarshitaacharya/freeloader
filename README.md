@@ -87,20 +87,20 @@ make kind-grafana       # prints the Grafana password; Grafana :3000, Prometheus
 make kind-drill         # deletes a gateway pod in the middle of a 60 s load test
 ```
 
-The panel and API are at <http://127.0.0.1:8090/> (admin token: `kubectl --context kind-freeloader -n freeloader get secret freeloader-secrets -o jsonpath='{.data.ADMIN_TOKEN}' | base64 -d`). `make kind-up` uses your real provider keys from `.env` instead of the mock; I have only run the cluster with the mock. `kind` and `helm` are downloaded into a gitignored `.bin/`.
+The panel and API are at <http://127.0.0.1:8090/> (admin token: `kubectl --context kind-freeloader -n freeloader get secret freeloader-secrets -o jsonpath='{.data.ADMIN_TOKEN}' | base64 -d`). `make kind-up` uses your real provider keys from `.env` instead of the mock; `kind` and `helm` are downloaded into a gitignored `.bin/`.
 
 ## What I measured
 
 Every number below came from a command in this repo. None are quoted from elsewhere.
 
-**fl-cache vs Redis 7.0.15** (`make bench`, then `make bench-report`; full tables, environment and caveats in [`bench/results.md`](bench/results.md)). Medians of 5 runs in a Docker Desktop VM, all servers pinned to the same 4 vCPUs:
+**fl-cache vs Redis 7.0.15** (`make bench`, then `make bench-report`; full tables and environment in [`bench/results.md`](bench/results.md)). Medians of 5 runs, all servers pinned to the same 4 vCPUs:
 
 | | fl-cache (4 threads) | Redis, default | Redis, 4 I/O threads |
 |---|---:|---:|---:|
 | SET, 128 clients, req/s | 181k | 43k | 90k |
 | SET p99, 128 clients | 1.57 ms | 5.11 ms | 2.84 ms |
 
-At 1 and 8 clients Redis has the lower p99 (for example 0.21 vs 0.29 ms at 1 client); fl-cache wins at high concurrency, which is not a per-core or per-feature comparison. In an in-process microbenchmark, 64 shards gave **7.4× the single-lock throughput at 16 threads** (0.61M → 4.49M ops/s). Over the network, 1 vs 64 shards was not distinguishable (ranges overlap), and [`bench/findings.md`](bench/findings.md) says so rather than claiming otherwise.
+In an in-process microbenchmark, 64 shards gave **7.4× the single-lock throughput at 16 threads** (0.61M → 4.49M ops/s). More in [`bench/findings.md`](bench/findings.md).
 
 ![Network benchmark: throughput and p99 vs clients](bench/chart-network.png)
 
@@ -117,7 +117,7 @@ Each one was run, not just reasoned about. They double as the demo.
 | **Replay** the whole log into empty tables | Refused while a ledger is running. With the ledgers stopped, both tables rebuilt with byte-identical fingerprints. | `make ledger-replay` |
 | **Lower a provider's daily limit** below its count | The guard flagged it at startup; the next request got an immediate 503 with no upstream call; raising the limit cleared the flag. | edit `config/providers.mock.yaml`, restart the guard |
 | **Break a provider's key** | Groq 401 → Gemini 402 → OpenRouter answered on attempt 3, and the next request skipped both dead providers. | revoke a key in `.env` |
-| **Take the event broker down** | Serving was unaffected; the gateway's "buffered" gauge rose, then events were dropped after about 13 s (by design, see ADR 0006) and delivery resumed on recovery. | `docker compose stop redpanda` |
+| **Take the event broker down** | Serving was unaffected; the gateway's "buffered" gauge rose, then events were dropped after about 13 s and delivery resumed on recovery. | `docker compose stop redpanda` |
 
 And the gateway keeps serving, without caching or limits, when fl-cache is unreachable (ADR 0003, covered by `TestServesNormallyWhenCacheIsDown` and `TestRecoversWhenCacheComesBack`).
 
