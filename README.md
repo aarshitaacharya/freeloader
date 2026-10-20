@@ -165,20 +165,6 @@ One short ADR per big choice, in [`docs/decisions/`](docs/decisions):
 
 [`docs/ownership.md`](docs/ownership.md) is a table of who owns every resource in the C++ server and when it dies.
 
-## Known limits
-
-Stated plainly, because a project like this is easy to oversell.
-
-- **Provider limits are per-account facts I can't know for you.** The example config holds what Groq's and Google's pages showed for my account on the dates noted in the file. The reset time of the daily limits is documented for Gemini (midnight Pacific) but **unverified** for Groq and OpenRouter, which I set to UTC. Model IDs change often.
-- **The guard sees only what the gateway sent, and only answered requests.** Limits are per project, so traffic from elsewhere spends them invisibly.
-- **Usage events can be lost** if the broker is down for more than the producer's timeout (ADR 0006); the ledger then undercounts. The cache and the live counters are separate from the durable record.
-- **App changes take up to 30 s** to reach every gateway replica (the auth cache). Provider "cooling down" status is per replica.
-- **fl-cache is a single replica** and in-memory by design; a restart resets rate-limit counters and the response cache.
-- **No login throttling on `/admin`**; the admin token is the only defence. Fine on a laptop; put rate limiting at the ingress before exposing it.
-- **Streamed responses are not cached**, and there is no semantic (similar-question) caching.
-- **Verified on mock providers at cluster level.** The Kubernetes stack and panel have only run with the offline mock provider. Real providers were verified through the Compose stack at the gateway level (including streaming with the official OpenAI client).
-- The benchmark ran in a Docker Desktop VM on a laptop, over loopback. Treat the ratios as indicative.
-
 ## Repository tour
 
 ```
