@@ -121,6 +121,22 @@ Each one was run, not just reasoned about. They double as the demo.
 
 And the gateway keeps serving, without caching or limits, when fl-cache is unreachable (ADR 0003, covered by `TestServesNormallyWhenCacheIsDown` and `TestRecoversWhenCacheComesBack`).
 
+### Real providers on the cluster
+
+`make kind-up` with real keys, then a few requests through the ingress (one sample each, from my laptop, so read them as "it works", not as benchmarks):
+
+| Request | Result |
+|---|---|
+| `fast` (Groq first) | 200 in 0.44 s, `X-Freeloader-Cache: MISS` |
+| the same request again | 200 in 8.9 ms, `HIT` |
+| `gemini/gemini-3.1-flash-lite` | 200 in 8.2 s |
+| `openrouter/minimax/minimax-m3.1-flash:free` | 200 in 0.93 s |
+| `fast` with `stream: true` | first byte after 0.27 s, 37 chunks |
+
+The ledger then showed Groq 3 requests (one a cache hit), Gemini 1 and OpenRouter 1, and fl-guard counted Groq as 2: a cache hit uses no quota. The panel shows the same numbers against each provider's limits:
+
+![Providers page with real limits and today's burn](docs/img/panel-providers-real.png)
+
 ### Observability
 
 A Grafana dashboard is generated from code ([`tools/dashboard/gen.py`](tools/dashboard/gen.py)) and provisioned into the cluster: traffic, latency by provider, failovers, quota burn, the event pipeline, fl-cache, and pod uptime. Six alert rules are loaded into Prometheus. The GIF is a time-lapse of a real run: a gateway pod is deleted mid-test and a new pod appears in the uptime panel while the load test finishes with zero failures.
@@ -137,7 +153,7 @@ A Grafana dashboard is generated from code ([`tools/dashboard/gen.py`](tools/das
 ## How it is tested
 
 - **fl-cache:** 55 GoogleTest tests (parser edge cases, concurrency, expiry, eviction, shutdown), run in CI under plain, AddressSanitizer and ThreadSanitizer builds.
-- **Go services:** table-driven unit tests with `-race`, and integration tests (build tag `integration`) against real Postgres, real Redpanda and the real fl-cache binary in containers via testcontainers. `golangci-lint` is clean on every module.
+- **Go services:** 133 test functions (gateway 98, guard 21, ledger 14), table-driven with `-race`, and integration tests (build tag `integration`) against real Postgres, real Redpanda and the real fl-cache binary in containers via testcontainers. `golangci-lint` is clean on every module.
 - **Admin API contract:** a test sends real requests to the handler and validates each response, errors included, against [`api/openapi.yaml`](api/openapi.yaml).
 - **Panel:** 60 tests (Vitest and Testing Library), `tsc --noEmit` in strict mode with no `any` (also enforced by ESLint), and a CI check that the generated API types match the spec.
 - **Kubernetes manifests** are rendered and schema-validated in CI.

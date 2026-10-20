@@ -36,3 +36,12 @@ A single flag per provider would let Gemini's 20-per-day model block its 500-per
   on real 429s is the backstop.
 - Verified live: with the limit lowered to 100/day and 101 requests counted, the guard flagged the provider on
   startup and the next request got an immediate 503 without touching the provider; raising it cleared the flag.
+
+## Addendum (2026-10-20): reset times still unverified
+
+Searching Groq's and OpenRouter's documentation did not turn up a stated reset time for their daily request
+limits. Gemini's (midnight Pacific) is documented. Groq's rate-limit headers hint at a rolling window rather
+than a fixed midnight, which would make the guard's "flag until the provider's next midnight" an approximation:
+it could clear a flag later or earlier than the provider does. The guard's threshold (90%) leaves headroom, and
+a provider that is still over its limit simply returns 429, which the gateway handles with a cooldown and
+failover. Both entries stay marked UNVERIFIED in `config/providers.example.yaml`.

@@ -35,7 +35,8 @@ providers:
     # for this account on 2026-10-19. requests_per_minute is informational (the gateway reacts to
     # real 429s with a cooldown instead).
     reset:
-      timezone: UTC   # UNVERIFIED: Groq's docs do not say when daily limits reset
+      timezone: UTC   # UNVERIFIED (searched 2026-10-20): Groq's docs list RPD but state no reset time; the
+                      # reset headers look like a rolling window, in which case a fixed midnight is only an approximation
     limits: {}
     models:
       openai/gpt-oss-20b:  {requests_per_minute: 30, requests_per_day: 1000, tokens_per_day: 200000}
@@ -67,7 +68,7 @@ providers:
     # One quota shared by every ':free' model, so it is a provider-wide limit, not a per-model one.
     # Failed requests count against it too; the guard only sees requests that were answered.
     reset:
-      timezone: UTC   # UNVERIFIED: not stated for the free-model cap
+      timezone: UTC   # UNVERIFIED (searched 2026-10-20): midnight UTC is documented for key spend limits only, not this cap
     limits:
       requests_per_minute: 20
       requests_per_day: 50
